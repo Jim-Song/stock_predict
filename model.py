@@ -15,7 +15,7 @@ class FcSkipBlock(nn.Module):
         self.fc2 = nn.Sequential(nn.Linear(dim_output, dim_output),
                                  nn.Dropout(dropout),
                                  )
-        self.active = nn.Tanh()
+        self.active = nn.Softplus()
 
     def forward(self, x):
         x1 = self.fc1(x)
@@ -115,7 +115,8 @@ class Model(nn.Module):
             input_dim=self.hidden2, nheads=4, nlayers=2)
         self.encoding_stocks = TokenEmbedding(self.stocks_num, self.emb_size_stocks)
         
-        self.output_linear = FcSkipBlock(self.hidden2, 14, 0.1)
+        self.output_linear = FcSkipBlock(self.hidden2, self.hidden2, 0.0)
+        self.output_linear2 = nn.Linear(self.hidden2, 14)
         
         self.softplus = nn.Softplus()
         
@@ -152,9 +153,11 @@ class Model(nn.Module):
         x6 = torch.mean(x5, dim=1)
         
         x7 = self.output_linear(x6)
-        x8 = self.softplus(x7)
+        x8 = self.output_linear2(x7)
         
-        return x8
+        x9 = self.softplus(x8)
+        
+        return x9
 
         
 

@@ -19,8 +19,6 @@ class StocksDataset(Dataset):
                  label_name="000133.XSHG", 
                  data_start_from=1158, 
                  data_end_at=3000, 
-                 prices_data_file=[],
-                 indexes_data_file=[]
                  ):
         time_slices = [0, -1,  -2,  -3,  -4,  -5,  -7,  -9,  -11, -13, -15, 
                        -18, -21, -24, -27, -30, -34, -38, -42, -46, -50, 
@@ -99,16 +97,17 @@ class StocksDataset(Dataset):
 
     def __getitem__(self, idx):
         
-        stock_prices, stock_indexes = self.get_non_nan_data_row(self.prices_data_block, idx, bias=0, num=400)
-        index_prices, index_indexes = self.get_non_nan_data_row(self.indexes_data_block, idx, bias=10000, num=30)
+        stock_prices, stock_indexes = self.get_non_nan_data_row(self.prices_data_block, idx, bias=0, num=811)
+        index_prices, index_indexes = self.get_non_nan_data_row(self.indexes_data_block, idx, bias=10000, num=200)
         
         sample1 = np.concatenate([stock_prices[:, :self.history_len, :], index_prices[:, :self.history_len, :]], axis=0)
         jizhun = sample1[:, 0, :]
         jizhun = np.expand_dims(jizhun, axis=1)
+        jizhun[:, :, :4] = 1
         # print(jizhun)
         sample1 = sample1 / jizhun
         sample2 = np.concatenate([stock_indexes, index_indexes], axis=0)
-        label = index_prices[0, self.history_len:, 0] / index_prices[0, 0, 0]
+        label = index_prices[0, self.history_len:, 0] / 10000 # / index_prices[0, 0, 0]
         sample1 = torch.tensor(sample1, dtype=torch.float32)
         return sample1, sample2, label
 

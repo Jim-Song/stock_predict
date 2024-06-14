@@ -50,16 +50,42 @@ stocks_dataset_test = StocksDataset(prices,
                                     data_end_at=test_data_end_at
                                     )
 
-dataloader = DataLoader(stocks_dataset, batch_size=10, num_workers=2)
-dataloader2 = DataLoader(stocks_dataset_test, batch_size=2, num_workers=2)
+dataloader = DataLoader(stocks_dataset, batch_size=4, shuffle=True, num_workers=2)
+dataloader2 = DataLoader(stocks_dataset_test, batch_size=2, shuffle=True, num_workers=2)
 
 
 model = Model().cuda()
+# model.load_state_dict(torch.load("model.pt"))
+
 opt = torch.optim.Adam(model.parameters(), lr=1e-3)
 
+"""
+mean
+label
+var
+probs
+
+"""
 step = 0
 mean_loss = 0
+mean_var = 0
 while True:
+    test_loss = 0
+    sure_degree = 0
+    for test_batch, item in enumerate(dataloader2):
+        # print(step)
+        # print(item)
+        predict_result = model.forward(item[0], item[1])
+        mean = predict_result[:, :7]
+        var = predict_result[:, 7:]
+        label = item[2].cuda()
+        probs = torch.exp(-((mean - label) / var) ** 2) / var
+        
+        loss = torch.mean(-1 * torch.log(probs))
+        test_loss += loss.detach().item()
+        sure_degree += torch.mean(var).item()
+    print("test loss: ", step, test_loss / (test_batch + 1), sure_degree / (test_batch + 1))
+    
     for _ in range(10):
         for item in dataloader:
             # print(item)
@@ -76,10 +102,12 @@ while True:
             loss = torch.mean(-1 * torch.log(probs))
             if step < 1000:
                 mean_loss = loss.item()
+                mean_var = torch.mean(var).item()
             else: 
                 mean_loss = 0.9999 * mean_loss + 0.0001 * loss.item()
-            # if step % 1000 == 0:
-            print("train loss: ", step, " steps", mean_loss, torch.mean(var).item())
+                mean_var = 0.9999 * mean_var + 0.0001 * torch.mean(var).item()
+            if step % 1000 == 0:
+                print("train loss: ", step, " steps", mean_loss, torch.mean(var).item())
             
 
             
@@ -91,21 +119,7 @@ while True:
             
             # a = 1234
     
-    test_loss = 0
-    sure_degree = 0
-    for test_batch, item in enumerate(dataloader2):
-        # print(step)
-        # print(item)
-        predict_result = model.forward(item[0], item[1])
-        mean = predict_result[:, :7]
-        var = predict_result[:, 7:]
-        label = item[2].cuda()
-        probs = torch.exp(-((mean - label) / var) ** 2) / var
-        
-        loss = torch.mean(-1 * torch.log(probs))
-        test_loss += loss.detach().item()
-        sure_degree += torch.mean(var).item()
-    print("test loss: ", step, test_loss / (test_batch + 1), sure_degree / (test_batch + 1))
+    
     torch.save(model.state_dict(), "model.pt")
     
         
