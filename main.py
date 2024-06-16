@@ -120,7 +120,7 @@ while True:
             else: 
                 mean_loss = 0.999 * mean_loss + 0.001 * loss.item()
                 mean_var = 0.999 * mean_var + 0.001 * torch.mean(var).item()
-            if step % 1 == 0:
+            if step % 10 == 0:
                 print("train loss: ", step, " steps", 
                       ", mean_loss: ", mean_loss, 
                       ", var: ", torch.mean(var).item(), 
