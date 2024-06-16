@@ -7,7 +7,7 @@ import math
 
 
 class FcSkipBlock(nn.Module):
-    def __init__(self, dim_input, dim_output, dropout=0.2):
+    def __init__(self, dim_input, dim_output, dropout=0.0):
         super().__init__()
         self.fc1 = nn.Sequential(nn.Linear(dim_input, dim_output),
                                  nn.Dropout(dropout),
@@ -15,7 +15,7 @@ class FcSkipBlock(nn.Module):
         self.fc2 = nn.Sequential(nn.Linear(dim_output, dim_output),
                                  nn.Dropout(dropout),
                                  )
-        self.active = nn.Softplus()
+        self.active = nn.LeakyReLU(negative_slope=0.1)
 
     def forward(self, x):
         x1 = self.fc1(x)
@@ -30,7 +30,9 @@ class TransformerModule(nn.Module):
         super().__init__()
         hidden_dim = input_dim
         encoder_layer = nn.TransformerEncoderLayer(
-            d_model=hidden_dim, nhead=nheads, dropout=0.1, batch_first=True)
+            d_model=hidden_dim, nhead=nheads, dropout=0.0, batch_first=True,
+            activation=nn.LeakyReLU(negative_slope=0.1)
+            )
         self.transformer_encoder = nn.TransformerEncoder(
             encoder_layer, nlayers, norm=None)
         # self.input_cat = nn.Linear(hidden_dim * max_num_p, hidden_dim*4)
@@ -92,7 +94,7 @@ class TokenEmbedding(nn.Module):
 class Model(nn.Module):
     def __init__(self, input_feature=6, time_size=35, stocks_num=20000):
         super(Model, self).__init__()
-        self.hidden1 = 16
+        self.hidden1 = 8
         self.emb_size_time = 8
         self.emb_size_stocks = 128
         self.stocks_num = stocks_num
@@ -104,22 +106,23 @@ class Model(nn.Module):
         
         self.encoding_time = PositionalEncoding(
                         self.emb_size_time, dropout=dropout, maxlen=self.time_size)
-        self.encode_input = FcSkipBlock(self.feature_size + self.emb_size_time, self.hidden1, 0.1)
+        self.encode_input = FcSkipBlock(self.feature_size + self.emb_size_time, self.hidden1, 0.0)
         
         self.transformer_time = TransformerModule(
             input_dim=self.hidden1, nheads=4, nlayers=2)
 
-        self.time_linear = FcSkipBlock(self.time_size * self.hidden1 + self.emb_size_stocks, self.hidden2, 0.1)
+        self.time_linear = FcSkipBlock(self.time_size * self.hidden1 + self.emb_size_stocks, self.hidden2)
                 
         self.transformer_stocks = TransformerModule(
-            input_dim=self.hidden2, nheads=4, nlayers=2)
+            input_dim=self.hidden2, nheads=1, nlayers=1)
         self.encoding_stocks = TokenEmbedding(self.stocks_num, self.emb_size_stocks)
         
         self.output_linear = FcSkipBlock(self.hidden2, self.hidden2, 0.0)
         self.output_linear2 = nn.Linear(self.hidden2, 14)
         
-        self.softplus = nn.Softplus()
+        self.softplus = nn.Sigmoid()
         
+        # self.test1 = nn.Linear(self.hidden2 * 2, 14)
         
     def forward(self, input_tensor, stock_indexes):
         # input_tensor [batch, stocks, time, feature]
@@ -154,34 +157,12 @@ class Model(nn.Module):
         
         x7 = self.output_linear(x6)
         x8 = self.output_linear2(x7)
+
+        x9 = self.softplus(x8) + 0.5
         
-        x9 = self.softplus(x8)
+        # tmp = torch.reshape(x4, [batch_size, self.hidden2 * 2])
+        # x9 = self.test1(tmp)
         
         return x9
-
-        
-
-        
-                
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-
-
-
-
-
-
-
-
-
 
 

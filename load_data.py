@@ -66,7 +66,7 @@ class StocksDataset(Dataset):
         means = {}
         stds = {}
         for key1, value in filtered_st_prices.items():
-            print(key1)
+            # print(key1)
             filtered_st_prices_list.append(np.expand_dims(value.values, axis=0))
             if key1 in self.label_name:
                 self.label_data = filtered_st_prices_list[-1]
@@ -79,14 +79,18 @@ class StocksDataset(Dataset):
         # prices_with_nan = torch.transpose(prices_with_nan, 0, 1)
         return prices_with_nan
     
-    def get_non_nan_data_row(self, data_block, idx, bias, num):
+    def get_non_nan_data_row(self, data_block, idx, bias, num, must_have_indexes=[]):
+        # print(idx)
         stocks_num = data_block.shape[0]
         idx = idx + 133
         tmp = data_block[:, self.time_slices + idx, :]
         stocks_indexes = np.array(list(range(stocks_num)))
         stock_not_nan_indexes = ~np.isnan(tmp).any(axis=2).any(axis=1)
         stock_not_nan_indexes = stocks_indexes[stock_not_nan_indexes]
-        stock_final_indexes = np.random.choice(stock_not_nan_indexes, num)
+        stock_final_indexes = np.random.choice(stock_not_nan_indexes, num, replace=False)
+        if must_have_indexes:
+            stock_final_indexes = np.concatenate([must_have_indexes, stock_final_indexes])
+        # print(stock_final_indexes)
         stocks_final = tmp[stock_final_indexes, :, :]
         # stocks_final = torch.tensor(stocks_final, dtype=torch.float32).cuda()
         stock_final_indexes += bias
@@ -97,17 +101,21 @@ class StocksDataset(Dataset):
 
     def __getitem__(self, idx):
         
-        stock_prices, stock_indexes = self.get_non_nan_data_row(self.prices_data_block, idx, bias=0, num=811)
-        index_prices, index_indexes = self.get_non_nan_data_row(self.indexes_data_block, idx, bias=10000, num=200)
+        stock_prices, stock_indexes = self.get_non_nan_data_row(self.prices_data_block, idx, bias=0, num=1000)
+        index_prices, index_indexes = self.get_non_nan_data_row(self.indexes_data_block, idx, bias=10000, num=100, must_have_indexes=[0])
         
         sample1 = np.concatenate([stock_prices[:, :self.history_len, :], index_prices[:, :self.history_len, :]], axis=0)
-        jizhun = sample1[:, 0, :]
+        # sample1 = np.concatenate([stock_prices, index_prices], axis=0)
+        # sample1 = index_prices[0: 2, :, :]
+        # sample1 = np.expand_dims(sample1, axis=0)
+        jizhun = sample1[:, 0, :].copy()
         jizhun = np.expand_dims(jizhun, axis=1)
-        jizhun[:, :, :4] = 1
+        # jizhun[:, :, :4] = 1
         # print(jizhun)
-        sample1 = sample1 / jizhun
+        sample1 = (sample1 / jizhun) - 1
         sample2 = np.concatenate([stock_indexes, index_indexes], axis=0)
-        label = index_prices[0, self.history_len:, 0] / 10000 # / index_prices[0, 0, 0]
+        # sample2 = np.array([0, 0])
+        label = index_prices[0, self.history_len:, 0] / index_prices[0, 0, 0]
         sample1 = torch.tensor(sample1, dtype=torch.float32)
         return sample1, sample2, label
 

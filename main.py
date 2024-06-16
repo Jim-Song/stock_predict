@@ -18,14 +18,14 @@ indexes_dir = "datas_clean/indexes"
 prices = {}
 for file in os.listdir(prices_dir):
     tmp = pd.read_pickle(os.path.join(prices_dir, file))
-    if tmp.open.isnull().sum() < data_start_from:
+    if tmp.open.isnull().sum() <= data_start_from and tmp.iloc[-1].isnull().sum() == 0:
         prices[file[: 11]] = tmp
 
 
 indexes = {}
 for file in os.listdir(indexes_dir):
     tmp = pd.read_pickle(os.path.join(indexes_dir, file))
-    if tmp.open.isnull().sum() < data_end_at:
+    if tmp.open.isnull().sum() <= data_start_from and tmp.iloc[-1].isnull().sum() == 0:
         indexes[file[: 11]] = tmp
 
 
@@ -50,14 +50,14 @@ stocks_dataset_test = StocksDataset(prices,
                                     data_end_at=test_data_end_at
                                     )
 
-dataloader = DataLoader(stocks_dataset, batch_size=4, shuffle=True, num_workers=2)
-dataloader2 = DataLoader(stocks_dataset_test, batch_size=2, shuffle=True, num_workers=2)
+dataloader = DataLoader(stocks_dataset, batch_size=4, shuffle=True, num_workers=4)
+dataloader2 = DataLoader(stocks_dataset_test, batch_size=2, shuffle=True, num_workers=4)
 
 
 model = Model().cuda()
 # model.load_state_dict(torch.load("model.pt"))
 
-opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+lr = 8e-2
 
 """
 mean
@@ -69,9 +69,14 @@ probs
 step = 0
 mean_loss = 0
 mean_var = 0
+# amp = 1e2
+mean_diff_mean = 1e-5
+
 while True:
     test_loss = 0
     sure_degree = 0
+    opt = torch.optim.Adam(model.parameters(), lr=lr)
+    lr *= 0.9999
     for test_batch, item in enumerate(dataloader2):
         # print(step)
         # print(item)
@@ -79,12 +84,18 @@ while True:
         mean = predict_result[:, :7]
         var = predict_result[:, 7:]
         label = item[2].cuda()
-        probs = torch.exp(-((mean - label) / var) ** 2) / var
         
-        loss = torch.mean(-1 * torch.log(probs))
+        # probs = torch.exp(-((mean - label) / var) ** 2) / var
+        # loss = torch.mean(-1 * torch.log(probs))
+        loss = torch.mean((mean - label) ** 2)
+        
         test_loss += loss.detach().item()
         sure_degree += torch.mean(var).item()
-    print("test loss: ", step, test_loss / (test_batch + 1), sure_degree / (test_batch + 1))
+    print("test loss: ", step, 
+            ", loss: ", test_loss / (test_batch + 1), 
+            ", sure_degree: ", sure_degree / (test_batch + 1), 
+            ", lr: ", lr,
+            )
     
     for _ in range(10):
         for item in dataloader:
@@ -97,30 +108,38 @@ while True:
             mean = predict_result[:, :7]
             var = predict_result[:, 7:]
             label = item[2].cuda()
-            probs = torch.exp(-((mean - label) / var) ** 2) / var
+            # probs = torch.exp(-((mean - label) / var) ** 2) / var
+            # loss = torch.mean(-1 * torch.log(probs))
+            loss = torch.mean((mean - label) ** 2)
+            mean_diff = torch.mean(torch.abs(mean[0] - torch.mean(mean, dim=0)))
+            mean_diff_mean = mean_diff_mean * 0.999 + mean_diff.item() * 0.001
             
-            loss = torch.mean(-1 * torch.log(probs))
-            if step < 1000:
+            if step < 100:
                 mean_loss = loss.item()
                 mean_var = torch.mean(var).item()
             else: 
-                mean_loss = 0.9999 * mean_loss + 0.0001 * loss.item()
-                mean_var = 0.9999 * mean_var + 0.0001 * torch.mean(var).item()
-            if step % 1000 == 0:
-                print("train loss: ", step, " steps", mean_loss, torch.mean(var).item())
-            
-
+                mean_loss = 0.999 * mean_loss + 0.001 * loss.item()
+                mean_var = 0.999 * mean_var + 0.001 * torch.mean(var).item()
+            if step % 1 == 0:
+                print("train loss: ", step, " steps", 
+                      ", mean_loss: ", mean_loss, 
+                      ", var: ", torch.mean(var).item(), 
+                      ", mean_diff_mean", mean_diff_mean,
+                      )
+                print(mean[0] == mean[1])
+                print(mean[: 2])
+                print(label[: 2])
+            if step % 500 == 0:
+                torch.save(model.state_dict(), "model.pt")
             
             opt.zero_grad()
             loss.backward()
             opt.step()
             # for item2 in model.parameters():
             #     print(item2.isnan().sum())
-            
-            # a = 1234
     
-    
-    torch.save(model.state_dict(), "model.pt")
+            if mean_diff_mean < 1e-5:
+                lr *= 1.01
     
         
         # for item2 in model.parameters():
@@ -131,25 +150,3 @@ while True:
     
     
     
-    
-    
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
