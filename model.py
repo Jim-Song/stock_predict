@@ -26,11 +26,11 @@ class FcSkipBlock(nn.Module):
 
 
 class TransformerModule(nn.Module):
-    def __init__(self, input_dim, nheads, nlayers):
+    def __init__(self, input_dim, nheads, nlayers, dropout=0.1):
         super().__init__()
         hidden_dim = input_dim
         encoder_layer = nn.TransformerEncoderLayer(
-            d_model=hidden_dim, nhead=nheads, dropout=0.0, batch_first=True,
+            d_model=hidden_dim, nhead=nheads, dropout=dropout, batch_first=True,
             activation=nn.LeakyReLU(negative_slope=0.1)
             )
         self.transformer_encoder = nn.TransformerEncoder(
@@ -102,25 +102,37 @@ class Model(nn.Module):
         self.feature_size = input_feature
         self.hidden2 = 256
         
-        dropout = 0.0
+        dropout = 0.2
         
         self.encoding_time = PositionalEncoding(
                         self.emb_size_time, dropout=dropout, maxlen=self.time_size)
-        self.encode_input = FcSkipBlock(self.feature_size + self.emb_size_time, self.hidden1, 0.0)
+        self.encode_input = FcSkipBlock(self.feature_size + self.emb_size_time, self.hidden1, dropout=dropout)
         
         self.transformer_time = TransformerModule(
-            input_dim=self.hidden1, nheads=4, nlayers=2)
+            input_dim=self.hidden1, nheads=4, nlayers=2, dropout=dropout)
 
-        self.time_linear = FcSkipBlock(self.time_size * self.hidden1 + self.emb_size_stocks, self.hidden2)
+        self.time_linear = FcSkipBlock(self.time_size * self.hidden1 + self.emb_size_stocks, self.hidden2, dropout=dropout)
+        self.time_bn = nn.BatchNorm1d(self.hidden2, affine=False, eps=1e-05, )
                 
         self.transformer_stocks = TransformerModule(
-            input_dim=self.hidden2, nheads=1, nlayers=1)
+            input_dim=self.hidden2, nheads=1, nlayers=4, dropout=dropout)
         self.encoding_stocks = TokenEmbedding(self.stocks_num, self.emb_size_stocks)
         
+        self.output_bn = nn.BatchNorm1d(self.hidden2, affine=False, eps=1e-05, )
         self.output_linear = FcSkipBlock(self.hidden2, self.hidden2, 0.0)
+        self.output_bn2 = nn.BatchNorm1d(self.hidden2, affine=False, eps=1e-05, )
+        
         self.output_linear2 = nn.Linear(self.hidden2, 14)
         
-        self.softplus = nn.Sigmoid()
+        self.softplus = nn.Softplus()
+        # self.raw_weight = torch.tensor(0.01, requires_grad=True)
+        # self.raw_weight = torch.nn.Parameter(self.raw_weight) 
+        # self.raw_weight2 = torch.tensor(0.99, requires_grad=True)
+        # self.raw_weight2 = torch.nn.Parameter(self.raw_weight2) 
+        # self.raw_weight3 = torch.tensor(0.01, requires_grad=True)
+        # self.raw_weight3 = torch.nn.Parameter(self.raw_weight3) 
+        # self.raw_weight4 = torch.tensor(0.99, requires_grad=True)
+        # self.raw_weight4 = torch.nn.Parameter(self.raw_weight4) 
         
         # self.test1 = nn.Linear(self.hidden2 * 2, 14)
         
@@ -142,23 +154,37 @@ class Model(nn.Module):
         
         x2 = self.transformer_time(x1)
         
+        # x23 = x2 * self.raw_weight + x1 * self.raw_weight2
         # stocks放在 dim 1, [batch, stocks, time * hidden1]
         x21 = torch.reshape(x2, [batch_size, stocks_size, self.hidden1 * time_size])
         
         x22 = self.encoding_stocks(stock_indexes)
         x3 = torch.concat([x21, x22], dim=2)
-                
+        
+        # [batch, stocks, hidden2]
         x4 = self.time_linear(x3)
         
+        x4 = torch.transpose(x4, 1, 2)
+        x41 = self.time_bn(x4)
+        # x41 = x4
+        x41 = torch.transpose(x41, 1, 2)
         
+        # [batch, stocks, hidden2]
+        x5 = self.transformer_stocks(x41)
+        # x51 = x5 * self.raw_weight3 + x41 * self.raw_weight4
         
-        x5 = self.transformer_stocks(x4)
         x6 = torch.mean(x5, dim=1)
         
-        x7 = self.output_linear(x6)
-        x8 = self.output_linear2(x7)
+        x61 = self.output_bn(x6)
+        # x61 = x6
+        x7 = self.output_linear(x61)
+        x71 = self.output_bn2(x7)
+        # x71 = x7
+        x8 = self.output_linear2(x71)
 
-        x9 = self.softplus(x8) + 0.5
+        x9 = self.softplus(x8)
+
+        x9[:, 7:] += 0.1
         
         # tmp = torch.reshape(x4, [batch_size, self.hidden2 * 2])
         # x9 = self.test1(tmp)

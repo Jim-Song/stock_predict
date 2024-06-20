@@ -19,6 +19,8 @@ class StocksDataset(Dataset):
                  label_name="000133.XSHG", 
                  data_start_from=1158, 
                  data_end_at=3000, 
+                 num1=500, 
+                 num2=100,
                  ):
         time_slices = [0, -1,  -2,  -3,  -4,  -5,  -7,  -9,  -11, -13, -15, 
                        -18, -21, -24, -27, -30, -34, -38, -42, -46, -50, 
@@ -33,6 +35,8 @@ class StocksDataset(Dataset):
         self.label_data = None
         self.label_mean = None
         self.label_std = None
+        self.num1 = num1
+        self.num2 = num2
         
         self.time_slices = np.array(time_slices)
 
@@ -54,6 +58,10 @@ class StocksDataset(Dataset):
         could_train_len = self.prices_data_block.shape[1] - self.time_range - 1
         print("could_train_len: ", could_train_len)
         self.data = list(range(could_train_len))
+        if self.num1 == 0:
+            self.num1 = len(self.prices_data_block)
+        if self.num2 == 0:
+            self.num2 = len(self.indexes_data_block)
     
     def get_data_block(self, prices):
         filtered_st_prices = {}
@@ -89,7 +97,8 @@ class StocksDataset(Dataset):
         stock_not_nan_indexes = stocks_indexes[stock_not_nan_indexes]
         stock_final_indexes = np.random.choice(stock_not_nan_indexes, num, replace=False)
         if must_have_indexes:
-            stock_final_indexes = np.concatenate([must_have_indexes, stock_final_indexes])
+            stock_final_indexes = [item for item in stock_final_indexes if item not in must_have_indexes]
+            stock_final_indexes = np.concatenate([must_have_indexes, stock_final_indexes])[: num]
         # print(stock_final_indexes)
         stocks_final = tmp[stock_final_indexes, :, :]
         # stocks_final = torch.tensor(stocks_final, dtype=torch.float32).cuda()
@@ -101,11 +110,16 @@ class StocksDataset(Dataset):
 
     def __getitem__(self, idx):
         
-        stock_prices, stock_indexes = self.get_non_nan_data_row(self.prices_data_block, idx, bias=0, num=1000)
-        index_prices, index_indexes = self.get_non_nan_data_row(self.indexes_data_block, idx, bias=10000, num=100, must_have_indexes=[0])
+        stock_prices, stock_indexes = self.get_non_nan_data_row(self.prices_data_block, idx, bias=0, num=self.num1)
+        index_prices, index_indexes = self.get_non_nan_data_row(self.indexes_data_block, idx, bias=10000, num=self.num2, must_have_indexes=[0])
         
+        # normal
         sample1 = np.concatenate([stock_prices[:, :self.history_len, :], index_prices[:, :self.history_len, :]], axis=0)
+        rand = np.random.normal(1, 0.02, size=sample1.shape)
+        sample1 = sample1 * rand
+        # cheat
         # sample1 = np.concatenate([stock_prices, index_prices], axis=0)
+
         # sample1 = index_prices[0: 2, :, :]
         # sample1 = np.expand_dims(sample1, axis=0)
         jizhun = sample1[:, 0, :].copy()

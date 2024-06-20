@@ -40,28 +40,33 @@ stocks_dataset = StocksDataset(prices,
                                indexes,
                                label_name=label_keys,
                                data_start_from=data_start_from, 
-                               data_end_at=data_end_at
+                               data_end_at=data_end_at, 
+                               num1=300, 
+                               num2=80,
                                )
 
 stocks_dataset_test = StocksDataset(prices, 
                                     indexes,
                                     label_name=label_keys,
                                     data_start_from=test_data_start_from, 
-                                    data_end_at=test_data_end_at
+                                    data_end_at=test_data_end_at,
+                                    num1=800, 
+                                    num2=200,
                                     )
 
-dataloader = DataLoader(stocks_dataset, batch_size=4, shuffle=True, num_workers=4)
+dataloader = DataLoader(stocks_dataset, batch_size=12, shuffle=True, num_workers=4)
 dataloader2 = DataLoader(stocks_dataset_test, batch_size=2, shuffle=True, num_workers=4)
 
 
 model = Model().cuda()
-# model.load_state_dict(torch.load("model.pt"))
+model.load_state_dict(torch.load("model.pt"))
 
-lr = 8e-2
+lr = 2e-5
 
 """
 mean
 label
+(mean - label) ** 2
 var
 probs
 
@@ -69,17 +74,25 @@ probs
 step = 0
 mean_loss = 0
 mean_var = 0
-# amp = 1e2
-mean_diff_mean = 1e-5
+amp = 1
+mean_diff_mean = 4e-4
 
 while True:
     test_loss = 0
+    test_loss_comp = 0
     sure_degree = 0
-    opt = torch.optim.Adam(model.parameters(), lr=lr)
-    lr *= 0.9999
+    opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-7)
+    lr *= 0.98
+    
+    model.eval()
+    test_batch_restore = None
     for test_batch, item in enumerate(dataloader2):
+        if not test_batch_restore:
+            test_batch_restore = item
         # print(step)
         # print(item)
+        if item[0].shape[0] <= 1:
+            continue
         predict_result = model.forward(item[0], item[1])
         mean = predict_result[:, :7]
         var = predict_result[:, 7:]
@@ -87,32 +100,50 @@ while True:
         
         # probs = torch.exp(-((mean - label) / var) ** 2) / var
         # loss = torch.mean(-1 * torch.log(probs))
+        
         loss = torch.mean((mean - label) ** 2)
+        ones = torch.ones(mean.shape).cuda()
+        test_loss_comp += torch.mean((ones - label) ** 2).detach().item()
         
         test_loss += loss.detach().item()
         sure_degree += torch.mean(var).item()
     print("test loss: ", step, 
             ", loss: ", test_loss / (test_batch + 1), 
+            ", loss_comp: ", test_loss_comp / (test_batch + 1), 
+            
             ", sure_degree: ", sure_degree / (test_batch + 1), 
             ", lr: ", lr,
+            # ", mean: ", mean, 
+            # ", label: ", label, 
             )
+    print(mean[: 2])
+    print(label[: 2])
+    # print(var[: 2])
+    # print(probs[: 2])
     
+    model.train()
     for _ in range(10):
         for item in dataloader:
             # print(item)
             
             step += 1
             predict_result = model.forward(item[0], item[1])
+            
+            # predict_result = model.forward(torch.concat([item[0], test_batch_restore[0]], 0), torch.concat([item[1], test_batch_restore[1]], 0))
             # print("0", item[0].isnan().sum())
             # print("1", item[1].isnan().sum())
             mean = predict_result[:, :7]
             var = predict_result[:, 7:]
             label = item[2].cuda()
-            # probs = torch.exp(-((mean - label) / var) ** 2) / var
-            # loss = torch.mean(-1 * torch.log(probs))
-            loss = torch.mean((mean - label) ** 2)
+            if step < 10000000:
+                loss = torch.mean((mean - label) ** 2)
+            else:
+                probs = torch.exp(-((mean - label) / var) ** 2) / var
+                probs[probs < 1e-10] = 1e-10
+                loss = torch.mean(-1 * torch.log(probs))
+            
             mean_diff = torch.mean(torch.abs(mean[0] - torch.mean(mean, dim=0)))
-            mean_diff_mean = mean_diff_mean * 0.999 + mean_diff.item() * 0.001
+            mean_diff_mean = mean_diff_mean * 0.99 + mean_diff.item() * 0.01
             
             if step < 100:
                 mean_loss = loss.item()
@@ -120,26 +151,47 @@ while True:
             else: 
                 mean_loss = 0.999 * mean_loss + 0.001 * loss.item()
                 mean_var = 0.999 * mean_var + 0.001 * torch.mean(var).item()
-            if step % 10 == 0:
+            
+            if step % 500 == 0:
+                torch.save(model.state_dict(), "model.pt")
+            
+            loss *= amp
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+            
+            # # stat nan
+            # all_nan_num = 0
+            # for item2 in model.parameters():
+            #     all_nan_num += item2.isnan().sum()
+            #     print(item2.isnan().sum(), torch.max(torch.abs(item2)))
+
+            # 学习率过小会导致无法收敛，手动增大学习率
+            if mean_diff_mean < 4e-4:
+                amp *= 1.01
+                print("amp: ", amp)
+            if amp > 5:
+                amp = 5
+            if amp > 1:
+                amp /= 1.0001
+            
+            
+            if step % 10 == 0 or step < 100:
+                # model.eval()
+                # predict_result = model.forward(item[0], item[1])
+                # mean2 = predict_result[:, :7]
                 print("train loss: ", step, " steps", 
                       ", mean_loss: ", mean_loss, 
                       ", var: ", torch.mean(var).item(), 
                       ", mean_diff_mean", mean_diff_mean,
                       )
-                print(mean[0] == mean[1])
+                # print(mean[0] == mean[1])
                 print(mean[: 2])
                 print(label[: 2])
-            if step % 500 == 0:
-                torch.save(model.state_dict(), "model.pt")
-            
-            opt.zero_grad()
-            loss.backward()
-            opt.step()
-            # for item2 in model.parameters():
-            #     print(item2.isnan().sum())
-    
-            if mean_diff_mean < 1e-5:
-                lr *= 1.01
+                # print(var[: 2])
+                # print(mean2[: 2])
+                # model.train()
+
     
         
         # for item2 in model.parameters():
