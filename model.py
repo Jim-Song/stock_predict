@@ -92,7 +92,7 @@ class TokenEmbedding(nn.Module):
 
 
 class Model(nn.Module):
-    def __init__(self, input_feature=6, time_size=35, stocks_num=20000):
+    def __init__(self, input_feature=4, time_size=35, stocks_num=20000):
         super(Model, self).__init__()
         self.hidden1 = 8
         self.emb_size_time = 8
