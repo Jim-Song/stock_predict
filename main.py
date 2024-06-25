@@ -41,8 +41,8 @@ stocks_dataset = StocksDataset(prices,
                                label_name=label_keys,
                                data_start_from=data_start_from, 
                                data_end_at=data_end_at, 
-                               num1=2, 
-                               num2=2,
+                               num1=1000, 
+                               num2=100,
                                )
 
 stocks_dataset_test = StocksDataset(prices, 
@@ -54,7 +54,7 @@ stocks_dataset_test = StocksDataset(prices,
                                     num2=200,
                                     )
 
-dataloader = DataLoader(stocks_dataset, batch_size=32, shuffle=True, num_workers=32)
+dataloader = DataLoader(stocks_dataset, batch_size=5, shuffle=True, num_workers=4)
 dataloader2 = DataLoader(stocks_dataset_test, batch_size=2, shuffle=True, num_workers=5)
 
 
@@ -78,7 +78,7 @@ amp = 1
 mean_diff_mean = 4e-4
 
 train_loss_comp = 0.0021
-train_data_mean = torch.tensor([1.0] * 7).cuda()
+train_data_mean = torch.tensor([0.0] * 7).cuda()
 
 while True:
     test_loss = 0
@@ -97,7 +97,7 @@ while True:
         if item[0].shape[0] <= 1:
             continue
         predict_result = model.forward(item[0], item[1])
-        mean = predict_result[:, :7]
+        mean = predict_result[:, :, :7]
         var = predict_result[:, 7:]
         label = item[2].cuda()
         
@@ -105,8 +105,8 @@ while True:
         # loss = torch.mean(-1 * torch.log(probs))
         
         loss = torch.mean((mean - label) ** 2)
-        ones = torch.ones(mean.shape).cuda()
-        test_loss_comp += torch.mean((ones - label) ** 2).detach().item()
+        zeros = torch.zeros(mean.shape).cuda()
+        test_loss_comp += torch.mean((zeros - label) ** 2).detach().item()
         
         test_loss += loss.detach().item()
         sure_degree += torch.mean(var).item()
@@ -119,8 +119,8 @@ while True:
             # ", mean: ", mean, 
             # ", label: ", label, 
             )
-    print(mean[: 2])
-    print(label[: 2])
+    print(mean[: 2, 0])
+    print(label[: 2, 0])
     # print(var[: 2])
     # print(probs[: 2])
     
@@ -135,7 +135,9 @@ while True:
             # predict_result = model.forward(torch.concat([item[0], test_batch_restore[0]], 0), torch.concat([item[1], test_batch_restore[1]], 0))
             # print("0", item[0].isnan().sum())
             # print("1", item[1].isnan().sum())
-            mean = predict_result[:, :7]
+            idxes = item[3]
+            raw_prices = item[4]
+            mean = predict_result[:, :, :7]
             var = predict_result[:, 7:]
             label = item[2].cuda()
             if step < 10000000:
@@ -149,7 +151,7 @@ while True:
             mean_diff = torch.mean(torch.abs(mean[0] - torch.mean(mean, dim=0)))
             mean_diff_mean = mean_diff_mean * 0.99 + mean_diff.item() * 0.01
 
-            train_data_mean = 0.99 * train_data_mean + 0.01 * torch.mean(label, dim=0)
+            train_data_mean = 0.99 * train_data_mean + 0.01 * torch.mean(torch.mean(label, dim=0), dim=0)
             train_loss_comp = 0.999 * train_loss_comp + 0.001 * (torch.mean((train_data_mean - label) ** 2) + torch.mean(torch.abs(train_data_mean - label)))
             
             if step < 100:
@@ -195,8 +197,8 @@ while True:
                       
                       )
                 # print(mean[0] == mean[1])
-                print(mean[: 2])
-                print(label[: 2])
+                print(mean[: 2, 0])
+                print(label[: 2, 0])
                 print(train_data_mean)
                 # print(var[: 2])
                 # print(mean2[: 2])

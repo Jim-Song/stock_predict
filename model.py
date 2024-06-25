@@ -173,18 +173,23 @@ class Model(nn.Module):
         x5 = self.transformer_stocks(x41)
         # x51 = x5 * self.raw_weight3 + x41 * self.raw_weight4
         
-        x6 = torch.mean(x5, dim=1)
+        # x6 = torch.mean(x5, dim=1)
         
-        x61 = self.output_bn(x6)
+        x5 = torch.transpose(x5, 1, 2)
+        x61 = self.output_bn(x5)
+        x61 = torch.transpose(x61, 1, 2)
         # x61 = x6
         x7 = self.output_linear(x61)
+        x7 = torch.transpose(x7, 1, 2)
         x71 = self.output_bn2(x7)
+        x71 = torch.transpose(x71, 1, 2)
         # x71 = x7
         x8 = self.output_linear2(x71)
+        
+        # x9 = self.softplus(x8)
+        x9 = x8
 
-        x9 = self.softplus(x8)
-
-        x9[:, 7:] += 0.1
+        # x9[:, 7:] += 0.1
         
         # tmp = torch.reshape(x4, [batch_size, self.hidden2 * 2])
         # x9 = self.test1(tmp)
