@@ -140,8 +140,8 @@ class Model(nn.Module):
         
     def forward(self, input_tensor, stock_indexes):
         # input_tensor [batch, stocks, time, feature]
-        input_tensor = input_tensor.cuda()
-        stock_indexes = stock_indexes.cuda()
+        # input_tensor = input_tensor.cuda()
+        # stock_indexes = stock_indexes.cuda()
         batch_size = input_tensor.shape[0]
         stocks_size = input_tensor.shape[1]
         time_size = input_tensor.shape[2]

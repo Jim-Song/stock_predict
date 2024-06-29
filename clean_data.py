@@ -8,12 +8,14 @@ for file in os.listdir("datas_clean/prices"):
     price = pd.read_pickle(os.path.join("datas_clean/prices", file))
     for i in range(len(price)):
         # current_index = len(price)
+        # 部分volumn缺失，使用上一天的volumn
         if price.iloc[i].volume == 0:
             for j in range(1000):
                 if not price.iloc[i - j].volume == 0:
                     price.iloc[i].volume = price.iloc[i - j].volume
                     price.iloc[i].money = price.iloc[i - j].money
                     break
+        # # volume 值方差过大，使用历史平均值平滑
         # range_len = min(10, i)
         # price.iloc[i].volume = price.iloc[i - range_len: i + 1].volume.mean()
         # price.iloc[i].money = price.iloc[i - range_len: i + 1].money.mean()
