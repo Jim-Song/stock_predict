@@ -92,7 +92,7 @@ class TokenEmbedding(nn.Module):
 
 
 class Model(nn.Module):
-    def __init__(self, input_feature=4, time_size=35, stocks_num=20000):
+    def __init__(self, input_feature=6, time_size=35, stocks_num=20000):
         super(Model, self).__init__()
         self.hidden1 = 8
         self.emb_size_time = 8
@@ -119,10 +119,12 @@ class Model(nn.Module):
         self.encoding_stocks = TokenEmbedding(self.stocks_num, self.emb_size_stocks)
         
         self.output_bn = nn.BatchNorm1d(self.hidden2, affine=False, eps=1e-05, )
-        self.output_linear = FcSkipBlock(self.hidden2, self.hidden2, 0.0)
+        self.output_linear1 = FcSkipBlock(self.hidden2, self.hidden2, 0.0)
+        self.output_linear2 = FcSkipBlock(self.hidden2, self.hidden2, 0.0)
+        self.output_linear3 = FcSkipBlock(self.hidden2, self.hidden2, 0.0)
         self.output_bn2 = nn.BatchNorm1d(self.hidden2, affine=False, eps=1e-05, )
         
-        self.output_linear2 = nn.Linear(self.hidden2, 14)
+        self.output_linear_final = nn.Linear(self.hidden2, 14)
         
         self.softplus = nn.Softplus()
         # self.raw_weight = torch.tensor(0.01, requires_grad=True)
@@ -179,21 +181,22 @@ class Model(nn.Module):
         x61 = self.output_bn(x5)
         x61 = torch.transpose(x61, 1, 2)
         # x61 = x6
-        x7 = self.output_linear(x61)
+        x62 = self.output_linear1(x61)
+        x7 = self.output_linear2(x62)
         x7 = torch.transpose(x7, 1, 2)
         x71 = self.output_bn2(x7)
         x71 = torch.transpose(x71, 1, 2)
         # x71 = x7
-        x8 = self.output_linear2(x71)
+        x8 = self.output_linear_final(x71)
+        x81 = x8[:, :, :7]
+        x82 = self.softplus(x8[:, :, 7:]) + 0.1
         
         # x9 = self.softplus(x8)
-        x9 = x8
-
         # x9[:, 7:] += 0.1
         
         # tmp = torch.reshape(x4, [batch_size, self.hidden2 * 2])
         # x9 = self.test1(tmp)
         
-        return x9
+        return x81, x82
 
 

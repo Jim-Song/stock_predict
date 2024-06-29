@@ -22,6 +22,7 @@ class StocksDataset(Dataset):
                  data_end_at=3000, 
                  num1=500, 
                  num2=100,
+                 use_rand=False,
                  ):
         time_slices = [0, -1,  -2,  -3,  -4,  -5,  -7,  -9,  -11, -13, -15, 
                        -18, -21, -24, -27, -30, -34, -38, -42, -46, -50, 
@@ -40,6 +41,7 @@ class StocksDataset(Dataset):
         self.num2 = num2
         self.key_indexes_dict = {}
         self.key_indexes_list = []
+        self.use_rand = use_rand
         
         self.time_slices = np.array(time_slices)
         self.time_slices_label = np.array(time_slices_label)
@@ -81,6 +83,7 @@ class StocksDataset(Dataset):
         ct = 0
         for key1, value in filtered_st_prices.items():
             print(ct, key1)
+            self.key_indexes_dict[ct] = key1
             filtered_st_prices_list.append(np.expand_dims(value.values, axis=0))
             if key1 in self.label_name:
                 self.key_indexes[key1] = ct
@@ -115,25 +118,41 @@ class StocksDataset(Dataset):
         tmp = np.concatenate(slice_all, axis=1)
         tmp2 = copy.copy(tmp)
         
-        rand_vars = np.linspace(0.01, 0.04, self.history_len - 1)
-        stocks_num, time_range, feature_size = tmp.shape
-        rands = []
-        for var in rand_vars:
-            rands.append(np.random.normal(1, var, (stocks_num, 1, feature_size)))
-        rand_array = np.concatenate(rands, axis=1)
-        tmp = tmp * rand_array
+        if self.use_rand:
+            rand_vars = np.linspace(0.01, 0.08, self.history_len - 1)
+            stocks_num, time_range, feature_size = tmp.shape
+            rands = []
+            for var in rand_vars:
+                rands.append(np.random.normal(1, var, (stocks_num, 1, feature_size)))
+            rand_array = np.concatenate(rands, axis=1)
+            tmp = tmp * rand_array
 
-# tmp = raw_prices[0].numpy()
+# tmp = item[4][0].numpy()
         jizhun = tmp[:, 0, :].copy()
         jizhun = np.expand_dims(jizhun, axis=1)
+        jizhun[:, :, -1] = 1
         tmp = (tmp / jizhun) - 1
         tmp = tmp[:, 1:, :]
+
+        tmp[:, :, -1] = np.log10(tmp[:, :, -1])
         # stock, time, price
         tmp_mean = np.mean(tmp, axis=0)
         tmp_mean = np.expand_dims(tmp_mean, axis=0)
         tmp_std = np.std(tmp, axis=0)
         tmp_std = np.expand_dims(tmp_std, axis=0)
         tmp = (tmp - tmp_mean) / tmp_std
+
+# # tmp = raw_prices[0].numpy()
+#         jizhun = tmp[:, 0, :].copy()
+#         jizhun = np.expand_dims(jizhun, axis=1)
+#         tmp = (tmp / jizhun) - 1
+#         tmp = tmp[:, 1:, :]
+#         # stock, time, price
+#         tmp_mean = np.mean(tmp, axis=0)
+#         tmp_mean = np.expand_dims(tmp_mean, axis=0)
+#         tmp_std = np.std(tmp, axis=0)
+#         tmp_std = np.expand_dims(tmp_std, axis=0)
+#         tmp = (tmp - tmp_mean) / tmp_std
 
         stocks_indexes = np.array(list(range(stocks_num)))
         stock_not_nan_indexes = ~np.isnan(tmp).any(axis=2).any(axis=1)
@@ -212,7 +231,7 @@ class StocksDataset(Dataset):
         # sample2 = np.array([0, 0])
         # label = index_prices[0, self.history_len:, 0] / index_prices[0, 0, 0]
         sample1 = torch.tensor(sample1, dtype=torch.float32)
-        sample1 = sample1[:, :, :4]
+        sample1 = sample1[:, :, :6]
         return sample1, sample2, label_prices, idx, stock_prices_raw
 
 
