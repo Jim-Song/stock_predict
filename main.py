@@ -6,7 +6,8 @@ import pandas as pd
 from torch.utils.data import DataLoader, Dataset
 import numpy as np
 import argparse
-
+import copy
+import time
 
 
 
@@ -30,6 +31,8 @@ def train(args):
         tmp = pd.read_pickle(os.path.join(indexes_dir, file))
         if tmp.open.isnull().sum() <= data_start_from and tmp.iloc[-1].isnull().sum() == 0:
             indexes[file[: 11]] = tmp
+    prices_and_indexes = copy.copy(prices)
+    prices_and_indexes.update(indexes)
 
     # label_keys = indexes.keys()
     # for key in indexes.keys():
@@ -50,7 +53,7 @@ def train(args):
                                         label_name=label_keys,
                                         data_start_from=test_data_start_from, 
                                         data_end_at=test_data_end_at,
-                                        num1=2800, 
+                                        num1=2847, 
                                         use_rand=False,
                                         )
 
@@ -71,7 +74,7 @@ def train(args):
     train_loss_comp = 1.0
     train_data_mean = torch.tensor([0.0] * 7).to(device)
 
-    train_var_step = 1
+    train_var_step = 50000
 
     while True:
         test_loss = 0
@@ -83,7 +86,9 @@ def train(args):
         model.eval()
         test_batch_restore = None
         advs = [[], [], [], [], [], [], [], ]
-        advs2 = []
+        ratios = [1, 1, 1, 1, 1, 1, 1]
+        daily_ratios = [[], [], [], [], [], [], [], ]
+        # advs2 = []
         for test_batch, item in enumerate(dataloader2):
             if not test_batch_restore:
                 test_batch_restore = item
@@ -122,39 +127,77 @@ def train(args):
             # adv = label_npy[0, :, 0][little_var_indexes][large_mean_indexes].mean()
             
             
-            large_mean_indexes = np.where(mean_npy[0, :, 0] == mean_npy[0, :, 0].max())
-            adv = label_npy[0, :, 0][large_mean_indexes].mean()
-            if not np.isnan(adv):
-                advs2.append(adv)
-            
+            # large_mean_indexes = np.where(mean_npy[0, :, 0] == mean_npy[0, :, 0].max())
+            # adv = label_npy[0, :, 0][large_mean_indexes].mean()
+            # if not np.isnan(adv):
+            #     advs2.append(adv)
+                
+            print("=====================================================================================================================")
+            test_idx = item[3].item() - stocks_dataset_test.time_slices[-1]
+            date_ = indexes["000001.XSHG"].iloc[test_data_start_from + test_idx].name
+            print("|\t\t\t时间: ", date_, "\t\t\t|")
             large_mean_indexes = np.where(mean_npy[0, :] == mean_npy[0, :].max(axis=0))
+            large_mean_indexes2 = list(zip(large_mean_indexes[0], large_mean_indexes[1]))
+            large_mean_indexes2.sort(key=lambda x: x[1])
             for adv_i in range(7):
-                advs[large_mean_indexes[1][adv_i]].append(label_npy[0, large_mean_indexes[0][adv_i], large_mean_indexes[1][adv_i]])
+                hold_stock_days_index = large_mean_indexes2[adv_i][1]
+                hold_stock_index = large_mean_indexes2[adv_i][0]
+                current_adv = label_npy[0, hold_stock_index, hold_stock_days_index]
+                advs[hold_stock_days_index].append(current_adv)
+                
+                stock_index = stocks_dataset_test.key_indexes_dict[hold_stock_index]
+                current_price = -1
+                future_price = -1
+                
+                hold_stock_days = stocks_dataset_test.time_slices_label[hold_stock_days_index + 2]
+                current_price = prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx].close
+                if test_data_start_from + test_idx + hold_stock_days < test_data_end_at:
+                    future_price = prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx + hold_stock_days].close
+                    sell_stock_date = prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx + hold_stock_days].name
+                    
+                if current_price > 0 and future_price > 0:
+                    ratio_tmp = future_price / current_price
+                    ratios[adv_i] *= ratio_tmp
+                    daily_ratio = ratios[adv_i] ** (1 / hold_stock_days)
+                    print("| 股票: ", stock_index, 
+                          "\t 持股天数: ", hold_stock_days, 
+                          "\t 策略净值:", str(daily_ratio)[: 5], 
+                          "\t 股票售价/现价:", str(ratio_tmp)[: 5], 
+                          "\t 现价:", str(current_price)[: 5], 
+                          "\t 售价:", str(future_price)[: 5] , 
+                          "\t 出售日期:", sell_stock_date , 
+                          "\t current_adv:", current_adv , 
+                          "\t|",
+                          )
+                    daily_ratios[adv_i].append(daily_ratio)
+                    
+
             aaa = 1
 
         print(advs)
+        print(ratios)
         adv = 0
         adv_means = []
         for adv_i in range(7):
             adv = sum(advs[adv_i]) / len(advs[adv_i])
             adv_means.append(adv)
-        adv_mean = sum(advs2) / len(advs2)
+        # adv_mean = sum(advs2) / len(advs2)
         print("test loss: ", step, 
                 ", loss: ", test_loss / (test_batch + 1), 
                 ", loss_comp: ", test_loss_comp / (test_batch + 1), 
-                
                 ", sure_degree: ", sure_degree / (test_batch + 1), 
                 ", lr: ", lr,
                 ", probs < 1e-4: ", (probs < 1e-4).sum(),
                 ", adv: ", adv_means,
-                ", adv_mean: ", adv_mean,
+                # ", adv_mean: ", adv_mean,
                 # ", mean: ", mean, 
                 # ", label: ", label, 
                 )
         print(mean[: 2, 0])
         print(label[: 2, 0])
-        print(var[: 2])
-        print(probs[: 2])
+        print(var[: 2, 0])
+        print(probs[: 2, 0])
+        # time.sleep(100)
         
         model.train()
         for _ in range(2):
@@ -270,7 +313,7 @@ def parse_args():
         "--batch_size",
         type=int,
         help="batch_size",
-        default=4,
+        default=3,
     )
     parser.add_argument(
         "--use_cuda",
