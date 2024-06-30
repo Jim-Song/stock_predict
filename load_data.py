@@ -71,22 +71,28 @@ class StocksDataset(Dataset):
         #     self.num2 = len(self.indexes_data_block)
     
     def get_data_block(self, prices):
+        ''' 
+            将数据转化为npy的array形式 
+            prices: pd式数据
+        '''
         filtered_st_prices = {}
+        # 过滤当前已停牌股票
         for key, value in prices.items():
             if value.iloc[-1].isnull().sum() > 0:
                 continue
             value = value[self.data_start_from: self.data_end_at]
             filtered_st_prices[key] = value
+        
         filtered_st_prices_list = []
-        means = {}
-        stds = {}
+        # means = {}
+        # stds = {}
         ct = 0
         for key1, value in filtered_st_prices.items():
             print(ct, key1)
             self.key_indexes_dict[ct] = key1
             filtered_st_prices_list.append(np.expand_dims(value.values, axis=0))
-            if key1 in self.label_name:
-                self.key_indexes[key1] = ct
+            # if key1 in self.label_name:
+            #     self.key_indexes[key1] = ct
             ct += 1
             #     self.label_data = filtered_st_prices_list[-1]
                 # self.label_mean = tmp_mean
@@ -100,6 +106,14 @@ class StocksDataset(Dataset):
     
     
     def get_non_nan_data_row(self, data_block, idx, bias, num, must_have_indexes=[]):
+        '''
+            data_block: [stock, time, feature]
+            idx: time index
+            num: train stocks num
+            idx表示时间，训练哪一天的股票
+            从idx对应的日期开始，往后 self.time_slices[-1] 天的数据作为训练数据
+            将这段时间里不包含nan的股票选出来组成 [stock, time, feature] 的数据块，其中time的长度与self.time_slices有关
+        '''
         # print(idx)
         # num = 100
         # bias = 0
@@ -108,6 +122,7 @@ class StocksDataset(Dataset):
         stocks_num = data_block.shape[0]
         idx = idx - self.time_slices[-1]
         # tmp = data_block[:, self.time_slices + idx, :]
+        # 将 time_slices 每两个相邻的日期的数据取出，取平均值
         slice_all = []
         for i in range(self.history_len - 1):
             # start = self.time_slices[i]
@@ -118,6 +133,7 @@ class StocksDataset(Dataset):
         tmp = np.concatenate(slice_all, axis=1)
         tmp2 = copy.copy(tmp)
         
+        # 将数据做随机化扰动，避免过拟合
         if self.use_rand:
             rand_vars = np.linspace(0.01, 0.08, self.history_len - 1)
             stocks_num, time_range, feature_size = tmp.shape
@@ -128,14 +144,15 @@ class StocksDataset(Dataset):
             tmp = tmp * rand_array
 
 # tmp = item[4][0].numpy()
+        # open、close、high、low、volume 数据取变化率情况，避免过拟合
         jizhun = tmp[:, 0, :].copy()
         jizhun = np.expand_dims(jizhun, axis=1)
         jizhun[:, :, -1] = 1
         tmp = (tmp / jizhun) - 1
         tmp = tmp[:, 1:, :]
-
+        # money 数据取对数，反应市值情况
         tmp[:, :, -1] = np.log10(tmp[:, :, -1])
-        # stock, time, price
+        # tmp.size = [stock, time, price], 对特征做归一化
         tmp_mean = np.mean(tmp, axis=0)
         tmp_mean = np.expand_dims(tmp_mean, axis=0)
         tmp_std = np.std(tmp, axis=0)
@@ -153,7 +170,7 @@ class StocksDataset(Dataset):
 #         tmp_std = np.std(tmp, axis=0)
 #         tmp_std = np.expand_dims(tmp_std, axis=0)
 #         tmp = (tmp - tmp_mean) / tmp_std
-
+        # 取出不包含nan数据的股票
         stocks_indexes = np.array(list(range(stocks_num)))
         stock_not_nan_indexes = ~np.isnan(tmp).any(axis=2).any(axis=1)
         stock_not_nan_indexes = stocks_indexes[stock_not_nan_indexes]

@@ -104,6 +104,7 @@ class Model(nn.Module):
         
         dropout = 0.2
         
+        # 对单只股票数据的时间做embedding
         self.encoding_time = PositionalEncoding(
                         self.emb_size_time, dropout=dropout, maxlen=self.time_size)
         self.encode_input = FcSkipBlock(self.feature_size + self.emb_size_time, self.hidden1, dropout=dropout)
@@ -113,7 +114,7 @@ class Model(nn.Module):
 
         self.time_linear = FcSkipBlock(self.time_size * self.hidden1 + self.emb_size_stocks, self.hidden2, dropout=dropout)
         self.time_bn = nn.BatchNorm1d(self.hidden2, affine=False, eps=1e-05, )
-                
+        # 对每只股票的编号做embedding
         self.transformer_stocks = TransformerModule(
             input_dim=self.hidden2, nheads=1, nlayers=4, dropout=dropout)
         self.encoding_stocks = TokenEmbedding(self.stocks_num, self.emb_size_stocks)
@@ -186,16 +187,12 @@ class Model(nn.Module):
         x7 = torch.transpose(x7, 1, 2)
         x71 = self.output_bn2(x7)
         x71 = torch.transpose(x71, 1, 2)
-        # x71 = x7
         x8 = self.output_linear_final(x71)
+        # x8.size = [batch_size, stock_num, 14]
+        # x8[: 7] 为 mean
+        # x8[7: ] 为 var，设计var是避免模型强行拟合到异常值
         x81 = x8[:, :, :7]
         x82 = self.softplus(x8[:, :, 7:]) + 0.1
-        
-        # x9 = self.softplus(x8)
-        # x9[:, 7:] += 0.1
-        
-        # tmp = torch.reshape(x4, [batch_size, self.hidden2 * 2])
-        # x9 = self.test1(tmp)
         
         return x81, x82
 

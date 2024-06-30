@@ -56,7 +56,7 @@ def train(args):
                                         num1=2847, 
                                         use_rand=False,
                                         )
-
+    # 训练集 & 测试集
     dataloader = DataLoader(stocks_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
     dataloader2 = DataLoader(stocks_dataset_test, batch_size=1, shuffle=False, num_workers=2)
 
@@ -74,6 +74,7 @@ def train(args):
     train_loss_comp = 1.0
     train_data_mean = torch.tensor([0.0] * 7).to(device)
 
+    # 前 train_var_step 步只训练mean，不训练var
     train_var_step = 50000
 
     while True:
@@ -85,6 +86,7 @@ def train(args):
         
         model.eval()
         test_batch_restore = None
+        # 策略的 advantage，共7种策略
         advs = [[], [], [], [], [], [], [], ]
         ratios = [1, 1, 1, 1, 1, 1, 1]
         daily_ratios = [[], [], [], [], [], [], [], ]
@@ -136,15 +138,18 @@ def train(args):
             test_idx = item[3].item() - stocks_dataset_test.time_slices[-1]
             date_ = indexes["000001.XSHG"].iloc[test_data_start_from + test_idx].name
             print("|\t\t\t时间: ", date_, "\t\t\t|")
+            # 取出每个持股期限上预测mean最大的股票index
             large_mean_indexes = np.where(mean_npy[0, :] == mean_npy[0, :].max(axis=0))
             large_mean_indexes2 = list(zip(large_mean_indexes[0], large_mean_indexes[1]))
             large_mean_indexes2.sort(key=lambda x: x[1])
             for adv_i in range(7):
+                # 获取股票的index和持有期限
                 hold_stock_days_index = large_mean_indexes2[adv_i][1]
                 hold_stock_index = large_mean_indexes2[adv_i][0]
                 current_adv = label_npy[0, hold_stock_index, hold_stock_days_index]
                 advs[hold_stock_days_index].append(current_adv)
                 
+                # 获取股票代码
                 stock_index = stocks_dataset_test.key_indexes_dict[hold_stock_index]
                 current_price = -1
                 future_price = -1
@@ -166,15 +171,13 @@ def train(args):
                           "\t 现价:", str(current_price)[: 5], 
                           "\t 售价:", str(future_price)[: 5] , 
                           "\t 出售日期:", sell_stock_date , 
-                          "\t current_adv:", current_adv , 
+                          "\t 优势度:", current_adv , 
                           "\t|",
                           )
                     daily_ratios[adv_i].append(daily_ratio)
-                    
-
             aaa = 1
 
-        print(advs)
+        # print(advs)
         print(ratios)
         adv = 0
         adv_means = []
@@ -216,6 +219,7 @@ def train(args):
                     loss +=  torch.mean(torch.abs(mean - label))
                 else:
                     probs = torch.exp(-((mean - label) / var) ** 2) / var
+                    # 异常值不训练，避免过大梯度
                     probs[probs < 1e-5] = 1e-5
                     loss = torch.mean(-1 * torch.log(probs))
                 
