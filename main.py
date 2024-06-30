@@ -141,47 +141,70 @@ def train(args):
             date_ = indexes["000001.XSHG"].iloc[test_data_start_from + test_idx].name
             dates.append(date_)
             print("|\t\t\t时间: ", date_, "\t\t\t|")
-            # 取出每个持股期限上预测mean最大的股票index
-            large_mean_indexes = np.where(mean_npy[0, :] == mean_npy[0, :].max(axis=0))
-            large_mean_indexes2 = list(zip(large_mean_indexes[0], large_mean_indexes[1]))
-            large_mean_indexes2.sort(key=lambda x: x[1])
+            
+            # large_mean_indexes = np.where(mean_npy[0, :] == mean_npy[0, :].max(axis=0))
+            # large_mean_indexes2 = list(zip(large_mean_indexes[0], large_mean_indexes[1]))
+            # large_mean_indexes2.sort(key=lambda x: x[1])
             for adv_i in range(7):
-                # 获取股票的index和持有期限
-                hold_stock_days_index = large_mean_indexes2[adv_i][1]
-                hold_stock_index = large_mean_indexes2[adv_i][0]
-                current_adv = label_npy[0, hold_stock_index, hold_stock_days_index]
-                advs[hold_stock_days_index].append(current_adv)
-                
-                # 获取股票代码
-                stock_index = stocks_dataset_test.key_indexes_dict[hold_stock_index]
-                current_price = -1
-                future_price = -1
-                
-                hold_stock_days = stocks_dataset_test.time_slices_label[hold_stock_days_index + 2]
-                current_price = prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx].close
-                if test_data_start_from + test_idx + hold_stock_days < test_data_end_at:
-                    future_price = prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx + hold_stock_days].close
-                    sell_stock_date = prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx + hold_stock_days].name
+                # 取出每个持股期限上预测 mean 最大 test_stock_num 只股票的 index
+                hold_stock_indexes = []
+                current_advs = []
+                for _ in range(args.test_stock_num):
+                    choose_stock = False
+                    for _ in range(100):
+                        large_mean_index = np.where(mean_npy[0, :, adv_i] == mean_npy[0, :, adv_i].max(axis=0))[0][0]
+                        mean_npy[0, :, adv_i][large_mean_index] = mean_npy[0, :, adv_i].min() - 1
+                        # 获取股票代码
+                        stock_index = stocks_dataset_test.key_indexes_dict[large_mean_index]
+                        # 只买流动性好的股票
+                        # print("当前股票： ", stock_index, ", 成交额： ", prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx].money)
+                        if prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx].money > 1e8:
+                            choose_stock = True
+                            break
+                        # print("流动性不足，忽略： ", stock_index, ", 成交额： ", prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx].money)
+                    if not choose_stock:
+                        break
+                        
+                    hold_stock_indexes.append(large_mean_index)
+                    current_advs.append(label_npy[0, large_mean_index, adv_i])
+                    current_adv = sum(current_advs) / len(current_advs)
                     
-                if current_price > 0 and future_price > 0:
-                    ratio_tmp = future_price / current_price
-                    ratios[adv_i] *= ratio_tmp
-                    daily_ratio = ratios[adv_i] ** (1 / hold_stock_days)
-                    print("| 股票: ", stock_index, 
-                          "\t 持股天数: ", hold_stock_days, 
-                          "\t 策略净值:", str(daily_ratio)[: 5], 
-                          "\t 股票售价/现价:", str(ratio_tmp)[: 5], 
-                          "\t 现价:", str(current_price)[: 5], 
-                          "\t 售价:", str(future_price)[: 5] , 
-                          "\t 出售日期:", sell_stock_date , 
-                          "\t 优势度:", str(current_adv)[: 5] , 
-                          "\t|",
-                          )
-                    daily_ratios[adv_i].append(daily_ratio)
+                    current_price = -1
+                    future_price = -1
+                    
+                    hold_stock_days = int(np.ceil((stocks_dataset_test.time_slices_label[adv_i + 1] + stocks_dataset_test.time_slices_label[adv_i + 2]) / 2))
+                    current_price = prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx + 1].open
+                    if test_data_start_from + test_idx + hold_stock_days < test_data_end_at:
+                        future_price = prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx + hold_stock_days].close
+                        sell_stock_date = prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx + hold_stock_days].name
+                        
+                    if current_price > 0 and future_price > 0:
+                        ratio_tmp = future_price / current_price
+                        # 不计算复利，每一时刻拿出本金的 1 / args.test_stock_num / hold_stock_days 购买新股票
+                        # 到期卖出后，如果股票价值低于本金的 1 / args.test_stock_num / hold_stock_days 则将本金补至初始本金并在利润中减去亏损值
+                        # 到期卖出后，如果股票价值高于本金的 1 / args.test_stock_num / hold_stock_days 则在总利润中加上当前利润
+                        ratios[adv_i] = ratios[adv_i] + (ratio_tmp - 1) / args.test_stock_num / hold_stock_days
+                        print("| 股票: ", stock_index, 
+                            "\t 持股天数: ", hold_stock_days, 
+                            "\t 策略净值:", str(ratios[adv_i])[: 5], 
+                            "\t 股票售价/现价:", str(ratio_tmp)[: 5], 
+                            "\t 现价:", str(current_price)[: 5], 
+                            "\t 售价:", str(future_price)[: 5] , 
+                            "\t 出售日期:", sell_stock_date , 
+                            "\t 优势度:", str(current_adv)[: 5] , 
+                            "\t|",
+                            )
+                daily_ratios[adv_i].append(ratios[adv_i])
+                    
+                # # 获取股票的index和持有期限
+                # # hold_stock_days_index = adv_i
+                # hold_stock_index = large_mean_indexes2[adv_i][0]
+                # # current_adv = label_npy[0, hold_stock_index, hold_stock_days_index]
+                # advs[adv_i].append(sum(current_advs) / len(current_advs))
+                advs[adv_i].append(current_adv)
             aaa = 1
-
         # print(advs)
-        print(ratios)
+        print("ratios: ", ratios)
         adv = 0
         adv_means = []
         for adv_i in range(7):
@@ -192,7 +215,8 @@ def train(args):
         
         for i in range(len(daily_ratios)):
             plt.plot(dates, daily_ratios[i])
-            plt.savefig("持股天数" + str(stocks_dataset_test.time_slices_label[i + 2]) + ".png")
+            hold_stock_days = int(np.ceil((stocks_dataset_test.time_slices_label[i + 1] + stocks_dataset_test.time_slices_label[i + 2]) / 2))
+            plt.savefig("持股天数" + str(hold_stock_days) + ".png")
             plt.close()
             max_pullback = 1
             for j in range(len(daily_ratios[i])):
@@ -365,10 +389,10 @@ def parse_args():
         default=0,
     )
     parser.add_argument(
-        "--time_interval",
+        "--test_stock_num",
         type=int,
         help="",
-        default=-1,
+        default=1,
     )
     parser.add_argument(
         "--get_model_from_exploiter_time_interval",
