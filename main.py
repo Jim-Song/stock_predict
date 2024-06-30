@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader, Dataset
 import numpy as np
 import argparse
 import copy
-import time
+import matplotlib.pyplot as plt
 
 
 
@@ -60,10 +60,11 @@ def train(args):
     dataloader = DataLoader(stocks_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
     dataloader2 = DataLoader(stocks_dataset_test, batch_size=1, shuffle=False, num_workers=2)
 
-    device = torch.device('cuda:0') if args.use_cuda else torch.device('cpu:0')
+    device = torch.device('cuda:0') if args.use_cuda else torch.device('cpu')
     model = Model().to(device)
     if args.restore:
-        model.load_state_dict(torch.load(args.restore))
+        map_location = torch.device('cuda:0') if args.use_cuda else torch.device('cpu')
+        model.load_state_dict(torch.load(args.restore, map_location=map_location))
 
     lr = 2e-4
     step = 0
@@ -90,6 +91,7 @@ def train(args):
         advs = [[], [], [], [], [], [], [], ]
         ratios = [1, 1, 1, 1, 1, 1, 1]
         daily_ratios = [[], [], [], [], [], [], [], ]
+        dates = []
         # advs2 = []
         for test_batch, item in enumerate(dataloader2):
             if not test_batch_restore:
@@ -137,6 +139,7 @@ def train(args):
             print("=====================================================================================================================")
             test_idx = item[3].item() - stocks_dataset_test.time_slices[-1]
             date_ = indexes["000001.XSHG"].iloc[test_data_start_from + test_idx].name
+            dates.append(date_)
             print("|\t\t\t时间: ", date_, "\t\t\t|")
             # 取出每个持股期限上预测mean最大的股票index
             large_mean_indexes = np.where(mean_npy[0, :] == mean_npy[0, :].max(axis=0))
@@ -171,7 +174,7 @@ def train(args):
                           "\t 现价:", str(current_price)[: 5], 
                           "\t 售价:", str(future_price)[: 5] , 
                           "\t 出售日期:", sell_stock_date , 
-                          "\t 优势度:", current_adv , 
+                          "\t 优势度:", str(current_adv)[: 5] , 
                           "\t|",
                           )
                     daily_ratios[adv_i].append(daily_ratio)
@@ -185,6 +188,22 @@ def train(args):
             adv = sum(advs[adv_i]) / len(advs[adv_i])
             adv_means.append(adv)
         # adv_mean = sum(advs2) / len(advs2)
+        pullbacks = []
+        
+        for i in range(len(daily_ratios)):
+            plt.plot(dates, daily_ratios[i])
+            plt.savefig("持股天数" + str(stocks_dataset_test.time_slices_label[i + 2]) + ".png")
+            plt.close()
+            max_pullback = 1
+            for j in range(len(daily_ratios[i])):
+                for k in range(j):
+                    ratio_tmp = daily_ratios[i][j] / daily_ratios[i][k]
+                    if ratio_tmp < max_pullback:
+                        max_pullback = ratio_tmp
+            max_pullback = 1 - max_pullback
+            pullbacks.append(max_pullback)
+        print("pullbacks: ", pullbacks)
+
         print("test loss: ", step, 
                 ", loss: ", test_loss / (test_batch + 1), 
                 ", loss_comp: ", test_loss_comp / (test_batch + 1), 
@@ -201,6 +220,8 @@ def train(args):
         print(var[: 2, 0])
         print(probs[: 2, 0])
         # time.sleep(100)
+        if args.only_test:
+            break
         
         model.train()
         for _ in range(2):
@@ -322,7 +343,7 @@ def parse_args():
     parser.add_argument(
         "--use_cuda",
         type=int,
-        help="exploiter_opponent_config_file",
+        help="",
         default=1,
     )
     parser.add_argument(
@@ -338,10 +359,10 @@ def parse_args():
         default=1200,
     )
     parser.add_argument(
-        "--pool_path",
-        type=str,
+        "--only_test",
+        type=int,
         help="",
-        default="/data/pool",
+        default=0,
     )
     parser.add_argument(
         "--time_interval",
