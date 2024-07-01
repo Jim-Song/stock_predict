@@ -40,7 +40,8 @@ class StocksDataset(Dataset):
         self.label_std = None
         self.num1 = num1
         self.num2 = num2
-        self.key_indexes_dict = {}
+        self.bianhao_code_dict = {}
+        self.code_bianhao_dict = {}
         self.key_indexes_list = []
         self.use_rand = use_rand
         self.embedding_config = embedding_config
@@ -96,7 +97,8 @@ class StocksDataset(Dataset):
             print(ct, key1)
             if key1 not in self.embedding_config:
                 print(key1, " 没有记录 embedding 编号，错误")
-            self.key_indexes_dict[ct] = key1
+            self.bianhao_code_dict[ct] = key1
+            self.code_bianhao_dict[key1] = ct
             filtered_st_prices_list.append(np.expand_dims(value.values, axis=0))
             self.position_to_embedding_num.append(self.embedding_config[key1])
             # if key1 in self.label_name:

@@ -39,7 +39,7 @@ def train(args):
     
     # 给予每只股票唯一的编号，训练时对应embedding不因股票数量变化发生改变
     if not os.path.exists("embedding_config.json"):
-        os.system("embedding_config.json")
+        os.system("echo \"{}\" > embedding_config.json")
     
     with open("embedding_config.json", "r") as f:
         embedding_config = json.load(f)
@@ -52,8 +52,8 @@ def train(args):
     
     for stock_code in prices_and_indexes.keys():
         if stock_code not in embedding_config:
-            order_to += 1
             embedding_config[stock_code] = order_to
+            order_to += 1
 
     with open("embedding_config.json", "w") as f:
         json.dump(embedding_config, f)
@@ -186,7 +186,7 @@ def train(args):
                         large_mean_index = np.where(mean_npy[0, :, adv_i] == mean_npy[0, :, adv_i].max(axis=0))[0][0]
                         mean_npy[0, :, adv_i][large_mean_index] = mean_npy[0, :, adv_i].min() - 1
                         # 获取股票代码
-                        stock_index = stocks_dataset_test.key_indexes_dict[large_mean_index]
+                        stock_index = stocks_dataset_test.bianhao_code_dict[large_mean_index]
                         # 只买流动性好的股票
                         # print("当前股票： ", stock_index, ", 成交额： ", prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx].money)
                         if prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx].money > 1e8:
@@ -247,7 +247,7 @@ def train(args):
         for i in range(len(daily_ratios)):
             plt.plot(dates, daily_ratios[i])
             hold_stock_days = int(np.ceil((stocks_dataset_test.time_slices_label[i + 1] + stocks_dataset_test.time_slices_label[i + 2]) / 2))
-            plt.savefig("持股天数" + str(hold_stock_days) + ".png")
+            plt.savefig("持有天数" + str(hold_stock_days) + ".png")
             plt.close()
             max_pullback = 1
             for j in range(len(daily_ratios[i])):
