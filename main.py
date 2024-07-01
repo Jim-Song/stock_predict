@@ -8,6 +8,7 @@ import numpy as np
 import argparse
 import copy
 import matplotlib.pyplot as plt
+import json
 
 
 
@@ -17,6 +18,8 @@ def train(args):
     data_end_at = args.data_end_at # 3000
     test_data_start_from = args.test_data_start_from # 3000
     test_data_end_at = args.test_data_end_at # 3499
+    if args.only_test:
+        test_data_end_at += 64
 
     # 载入数据
     prices_dir = args.prices_dir # "datas_clean/prices"
@@ -33,6 +36,32 @@ def train(args):
             indexes[file[: 11]] = tmp
     prices_and_indexes = copy.copy(prices)
     prices_and_indexes.update(indexes)
+    
+    # 给予每只股票唯一的编号，训练时对应embedding不因股票数量变化发生改变
+    if not os.path.exists("embedding_config.json"):
+        os.system("embedding_config.json")
+    
+    with open("embedding_config.json", "r") as f:
+        embedding_config = json.load(f)
+    
+    # 已记录股票编号到第几
+    order_to = 0
+    for stock_code, order_num in embedding_config.items():
+        if order_num > order_to:
+            order_to = order_num
+    
+    for stock_code in prices_and_indexes.keys():
+        if stock_code not in embedding_config:
+            order_to += 1
+            embedding_config[stock_code] = order_to
+
+    with open("embedding_config.json", "w") as f:
+        json.dump(embedding_config, f)
+    
+    
+    
+    
+    
 
     # label_keys = indexes.keys()
     # for key in indexes.keys():
@@ -46,6 +75,7 @@ def train(args):
                                     data_end_at=data_end_at, 
                                     num1=args.train_stock_num, # 1200
                                     use_rand=True,
+                                    embedding_config=embedding_config,
                                     )
 
     stocks_dataset_test = StocksDataset(prices, 
@@ -55,6 +85,7 @@ def train(args):
                                         data_end_at=test_data_end_at,
                                         num1=2847, 
                                         use_rand=False,
+                                        embedding_config=embedding_config,
                                         )
     # 训练集 & 测试集
     dataloader = DataLoader(stocks_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
@@ -82,7 +113,7 @@ def train(args):
         test_loss = 0
         test_loss_comp = 0
         sure_degree = 0
-        opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
+        opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=5e-5)
         lr *= 0.98
         
         model.eval()

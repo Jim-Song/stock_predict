@@ -23,6 +23,7 @@ class StocksDataset(Dataset):
                  num1=500, 
                  num2=100,
                  use_rand=False,
+                 embedding_config={},
                  ):
         time_slices = [0, -1,  -2,  -3,  -4,  -5,  -7,  -9,  -11, -13, -15, 
                        -18, -21, -24, -27, -30, -34, -38, -42, -46, -50, 
@@ -42,6 +43,9 @@ class StocksDataset(Dataset):
         self.key_indexes_dict = {}
         self.key_indexes_list = []
         self.use_rand = use_rand
+        self.embedding_config = embedding_config
+        # 每支股票在data_block中的行数到 embedding 中的编号
+        self.position_to_embedding_num = []
         
         self.time_slices = np.array(time_slices)
         self.time_slices_label = np.array(time_slices_label)
@@ -49,6 +53,7 @@ class StocksDataset(Dataset):
         prices_and_indexes = copy.copy(prices)
         prices_and_indexes.update(indexes)
         self.prices_and_indexes_data_block = self.get_data_block(prices_and_indexes)
+        self.position_to_embedding_num = np.array(self.position_to_embedding_num)
         # mean = np.nanmean(self.prices_data_block, axis=1)
         # mean = np.expand_dims(mean, 1)
         # std = np.nanstd(self.prices_data_block, axis=1)
@@ -89,8 +94,11 @@ class StocksDataset(Dataset):
         ct = 0
         for key1, value in filtered_st_prices.items():
             print(ct, key1)
+            if key1 not in self.embedding_config:
+                print(key1, " 没有记录 embedding 编号，错误")
             self.key_indexes_dict[ct] = key1
             filtered_st_prices_list.append(np.expand_dims(value.values, axis=0))
+            self.position_to_embedding_num.append(self.embedding_config[key1])
             # if key1 in self.label_name:
             #     self.key_indexes[key1] = ct
             ct += 1
@@ -185,9 +193,10 @@ class StocksDataset(Dataset):
         stock_final_indexes.sort()
         stocks_final = tmp[stock_final_indexes, :, :]
         # stocks_final = torch.tensor(stocks_final, dtype=torch.float32).cuda()
-        stock_final_indexes += bias
+        # stock_final_indexes += bias
+        embedding_bianhao = self.position_to_embedding_num[stock_final_indexes]
 
-        return stocks_final, stock_final_indexes, tmp2
+        return stocks_final, stock_final_indexes, embedding_bianhao, tmp2
 
 
     def get_label(self, data_block, idx, must_have_indexes=[0]):
@@ -223,7 +232,7 @@ class StocksDataset(Dataset):
 
     def __getitem__(self, idx):
         
-        stock_prices, stock_indexes, stock_prices_raw = self.get_non_nan_data_row(self.prices_and_indexes_data_block, idx, bias=0, num=self.num1)
+        stock_prices, stock_indexes, embedding_bianhao, stock_prices_raw = self.get_non_nan_data_row(self.prices_and_indexes_data_block, idx, bias=0, num=self.num1)
         # index_prices, index_indexes = self.get_non_nan_data_row(self.indexes_data_block, idx, bias=10000, num=self.num2, must_have_indexes=[])
         
         label_prices = self.get_label(self.prices_and_indexes_data_block, idx, must_have_indexes=stock_indexes)
@@ -244,12 +253,12 @@ class StocksDataset(Dataset):
         # print(jizhun)
         # sample1 = (sample1 / jizhun) - 1
         # sample2 = np.concatenate([stock_indexes, index_indexes], axis=0)
-        sample2 = np.array(stock_indexes)
+        sample2 = np.array(embedding_bianhao)
         # sample2 = np.array([0, 0])
         # label = index_prices[0, self.history_len:, 0] / index_prices[0, 0, 0]
         sample1 = torch.tensor(sample1, dtype=torch.float32)
         sample1 = sample1[:, :, :6]
-        return sample1, sample2, label_prices, idx, stock_prices_raw
+        return sample1, sample2, label_prices, idx, stock_prices_raw, stock_indexes
 
 
 
