@@ -374,7 +374,7 @@ def parse_args():
         "--restore",
         type=str,
         help="",
-        default="model.pt",
+        default="",
     )
     parser.add_argument(
         "--train_stock_num",
