@@ -24,6 +24,8 @@ class StocksDataset(Dataset):
                  num2=100,
                  use_rand=False,
                  embedding_config={},
+                 only_test=False,
+                 only_need_result=False,
                  ):
         time_slices = [0, -1,  -2,  -3,  -4,  -5,  -7,  -9,  -11, -13, -15, 
                        -18, -21, -24, -27, -30, -34, -38, -42, -46, -50, 
@@ -33,7 +35,7 @@ class StocksDataset(Dataset):
         self.predict_len = len(time_slices_label)
         self.data_start_from = data_start_from
         self.data_end_at = data_end_at
-        self.time_range = time_slices_label[-1] - time_slices[-1]
+        
         self.label_name = label_name
         self.label_data = None
         self.label_mean = None
@@ -47,6 +49,11 @@ class StocksDataset(Dataset):
         self.embedding_config = embedding_config
         # 每支股票在data_block中的行数到 embedding 中的编号
         self.position_to_embedding_num = []
+        self.only_need_result = only_need_result
+        if only_need_result:
+            self.time_range = -time_slices[-1] - 1
+        else:
+            self.time_range = time_slices_label[-1] - time_slices[-1]
         
         self.time_slices = np.array(time_slices)
         self.time_slices_label = np.array(time_slices_label)
@@ -99,7 +106,11 @@ class StocksDataset(Dataset):
                 print(key1, " 没有记录 embedding 编号，错误")
             self.bianhao_code_dict[ct] = key1
             self.code_bianhao_dict[key1] = ct
-            filtered_st_prices_list.append(np.expand_dims(value.values, axis=0))
+            value_tmp = np.expand_dims(value.values, axis=0)
+            filtered_st_prices_list.append(value_tmp)
+            # if value_tmp.shape[1] < 3:
+            #     import time
+            #     time.sleep(100)
             self.position_to_embedding_num.append(self.embedding_config[key1])
             # if key1 in self.label_name:
             #     self.key_indexes[key1] = ct
@@ -128,7 +139,8 @@ class StocksDataset(Dataset):
         # num = 100
         # bias = 0
         # must_have_indexes=[]
-        # data_block = prices_with_nan[:, 1200:, :]
+        # data_block = self.prices_and_indexes_data_block[:, 1200:, :]
+        # idx = 0
         stocks_num = data_block.shape[0]
         idx = idx - self.time_slices[-1]
         # tmp = data_block[:, self.time_slices + idx, :]
@@ -184,10 +196,13 @@ class StocksDataset(Dataset):
         stocks_indexes = np.array(list(range(stocks_num)))
         stock_not_nan_indexes = ~np.isnan(tmp).any(axis=2).any(axis=1)
         stock_not_nan_indexes = stocks_indexes[stock_not_nan_indexes]
-        # print(stock_not_nan_indexes)
+        print(stock_not_nan_indexes)
         # print(idx)
         # print(num)
-        stock_final_indexes = np.random.choice(stock_not_nan_indexes, num, replace=False)
+        if num > 0:
+            stock_final_indexes = np.random.choice(stock_not_nan_indexes, num, replace=False)
+        else:
+            stock_final_indexes = stock_not_nan_indexes
         if must_have_indexes:
             stock_final_indexes = [item for item in stock_final_indexes if item not in must_have_indexes]
             stock_final_indexes = np.concatenate([must_have_indexes, stock_final_indexes])[: num]
@@ -202,6 +217,10 @@ class StocksDataset(Dataset):
 
 
     def get_label(self, data_block, idx, must_have_indexes=[0]):
+        if self.only_need_result:
+            stocks_final = np.zeros([len(must_have_indexes), 7])
+            return stocks_final
+            
         idx = idx - self.time_slices[-1]
         slice_all = []
         for i in range(self.predict_len - 1):

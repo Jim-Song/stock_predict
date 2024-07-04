@@ -18,8 +18,6 @@ def train(args):
     data_end_at = args.data_end_at # 3000
     test_data_start_from = args.test_data_start_from # 3000
     test_data_end_at = args.test_data_end_at # 3499
-    if args.only_test:
-        test_data_end_at += 64
 
     # 载入数据
     prices_dir = args.prices_dir # "datas_clean/prices"
@@ -27,12 +25,12 @@ def train(args):
     prices = {}
     for file in os.listdir(prices_dir):
         tmp = pd.read_pickle(os.path.join(prices_dir, file))
-        if tmp.open.isnull().sum() <= data_start_from and tmp.iloc[-1].isnull().sum() == 0:
+        if tmp.open.isnull().sum() <= data_start_from and tmp.iloc[-1].isnull().sum() == 0 and len(tmp) >= 3499:
             prices[file[: 11]] = tmp
     indexes = {}
     for file in os.listdir(indexes_dir):
         tmp = pd.read_pickle(os.path.join(indexes_dir, file))
-        if tmp.open.isnull().sum() <= data_start_from and tmp.iloc[-1].isnull().sum() == 0:
+        if tmp.open.isnull().sum() <= data_start_from and tmp.iloc[-1].isnull().sum() == 0 and len(tmp) >= 3499:
             indexes[file[: 11]] = tmp
     prices_and_indexes = copy.copy(prices)
     prices_and_indexes.update(indexes)
@@ -83,9 +81,11 @@ def train(args):
                                         label_name=label_keys,
                                         data_start_from=test_data_start_from, 
                                         data_end_at=test_data_end_at,
-                                        num1=2847, 
+                                        num1=-1, 
                                         use_rand=False,
                                         embedding_config=embedding_config,
+                                        only_test=args.only_test,
+                                        only_need_result=args.only_need_result,
                                         )
     # 训练集 & 测试集
     dataloader = DataLoader(stocks_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
@@ -189,7 +189,8 @@ def train(args):
                         stock_index = stocks_dataset_test.bianhao_code_dict[large_mean_index]
                         # 只买流动性好的股票
                         # print("当前股票： ", stock_index, ", 成交额： ", prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx].money)
-                        if prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx].money > 1e8:
+                        if prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx].money > 1e8 \
+                            and prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx].close > 3.0:
                             choose_stock = True
                             break
                         # print("流动性不足，忽略： ", stock_index, ", 成交额： ", prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx].money)
@@ -204,7 +205,14 @@ def train(args):
                     future_price = -1
                     
                     hold_stock_days = int(np.ceil((stocks_dataset_test.time_slices_label[adv_i + 1] + stocks_dataset_test.time_slices_label[adv_i + 2]) / 2))
+                    if test_data_start_from + test_idx + hold_stock_days >= prices_and_indexes[stock_index].shape[0]:
+                        print("| 股票: ", stock_index, 
+                                "\t 持股天数: ", hold_stock_days, 
+                                )
+                        continue
                     current_price = prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx + 1].open
+                    
+
                     if test_data_start_from + test_idx + hold_stock_days < test_data_end_at:
                         future_price = prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx + hold_stock_days].close
                         sell_stock_date = prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx + hold_stock_days].name
@@ -426,10 +434,10 @@ def parse_args():
         default=1,
     )
     parser.add_argument(
-        "--get_model_from_exploiter_time_interval",
+        "--only_need_result",
         type=int,
         help="",
-        default=36000,
+        default=0,
     )
     parser.add_argument(
         "--stat_dirpath",
