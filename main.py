@@ -14,8 +14,8 @@ import json
 
 def train(args):
     # 设置训练 & 测试数据时间
-    data_start_from = args.data_start_from # 1200
-    data_end_at = args.data_end_at # 3000
+    train_data_start_from = args.train_data_start_from # 1200
+    train_data_end_at = args.train_data_end_at # 3000
     test_data_start_from = args.test_data_start_from # 3000
     test_data_end_at = args.test_data_end_at # 3499
 
@@ -25,12 +25,12 @@ def train(args):
     prices = {}
     for file in os.listdir(prices_dir):
         tmp = pd.read_pickle(os.path.join(prices_dir, file))
-        if tmp.open.isnull().sum() <= data_start_from and tmp.iloc[-1].isnull().sum() == 0 and len(tmp) >= 3499:
+        if tmp.open.isnull().sum() <= train_data_start_from and tmp.iloc[-1].isnull().sum() == 0 and len(tmp) >= 3499:
             prices[file[: 11]] = tmp
     indexes = {}
     for file in os.listdir(indexes_dir):
         tmp = pd.read_pickle(os.path.join(indexes_dir, file))
-        if tmp.open.isnull().sum() <= data_start_from and tmp.iloc[-1].isnull().sum() == 0 and len(tmp) >= 3499:
+        if tmp.open.isnull().sum() <= train_data_start_from and tmp.iloc[-1].isnull().sum() == 0 and len(tmp) >= 3499:
             indexes[file[: 11]] = tmp
     prices_and_indexes = copy.copy(prices)
     prices_and_indexes.update(indexes)
@@ -69,8 +69,8 @@ def train(args):
     stocks_dataset = StocksDataset(prices, 
                                     indexes,
                                     label_name=label_keys,
-                                    data_start_from=data_start_from, 
-                                    data_end_at=data_end_at, 
+                                    data_start_from=train_data_start_from, 
+                                    data_end_at=train_data_end_at, 
                                     num1=args.train_stock_num, # 1200
                                     use_rand=True,
                                     embedding_config=embedding_config,
@@ -88,7 +88,7 @@ def train(args):
                                         only_need_result=args.only_need_result,
                                         )
     # 训练集 & 测试集
-    dataloader = DataLoader(stocks_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
+    dataloader = DataLoader(stocks_dataset, batch_size=args.batch_size, shuffle=True, num_workers=25)
     dataloader2 = DataLoader(stocks_dataset_test, batch_size=1, shuffle=False, num_workers=2)
 
     device = torch.device('cuda:0') if args.use_cuda else torch.device('cpu')
@@ -97,11 +97,11 @@ def train(args):
         map_location = torch.device('cuda:0') if args.use_cuda else torch.device('cpu')
         model.load_state_dict(torch.load(args.restore, map_location=map_location))
 
-    lr = 2e-4
+    lr = 5e-5
     step = 0
     mean_loss = 0
     mean_var = 0
-    mean_diff_mean = 4e-4
+    mean_diff_mean = 6e-4
 
     train_loss_comp = 1.0
     train_data_mean = torch.tensor([0.0] * 7).to(device)
@@ -113,7 +113,7 @@ def train(args):
         test_loss = 0
         test_loss_comp = 0
         sure_degree = 0
-        opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=5e-5)
+        opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-3)
         lr *= 0.98
         
         model.eval()
@@ -150,9 +150,9 @@ def train(args):
             
             test_loss += loss.detach().item()
             sure_degree += torch.mean(var).item()
-            mean_npy = mean.detach().cpu().numpy()
-            label_npy = label.detach().cpu().numpy()
-            var_npy = var.detach().cpu().numpy()
+            mean_npy = mean.detach().cpu().numpy().copy()
+            label_npy = label.detach().cpu().numpy().copy()
+            var_npy = var.detach().cpu().numpy().copy()
             # var_thres = 0.5
             # mean_thres = 0.5
             # little_var_indexes = np.where(var_npy[0, :, 0] < var_thres)
@@ -180,7 +180,12 @@ def train(args):
                 # 取出每个持股期限上预测 mean 最大 test_stock_num 只股票的 index
                 hold_stock_indexes = []
                 current_advs = []
-                for _ in range(args.test_stock_num):
+                current_adv_avg = 0
+                if adv_i == 0:
+                    test_stock_num = args.test_stock_num * 10
+                # else:
+                #     test_stock_num = args.test_stock_num
+                for stock_num_idx in range(test_stock_num):
                     choose_stock = False
                     for _ in range(100):
                         large_mean_index = np.where(mean_npy[0, :, adv_i] == mean_npy[0, :, adv_i].max(axis=0))[0][0]
@@ -195,44 +200,46 @@ def train(args):
                             break
                         # print("流动性不足，忽略： ", stock_index, ", 成交额： ", prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx].money)
                     if not choose_stock:
+                        print("no match")
                         break
                         
                     hold_stock_indexes.append(large_mean_index)
-                    current_advs.append(label_npy[0, large_mean_index, adv_i])
-                    current_adv = sum(current_advs) / len(current_advs)
+                    current_adv = label_npy[0, large_mean_index, adv_i]
+                    current_advs.append(current_adv)
                     
                     current_price = -1
                     future_price = -1
                     
-                    hold_stock_days = int(np.ceil((stocks_dataset_test.time_slices_label[adv_i + 1] + stocks_dataset_test.time_slices_label[adv_i + 2]) / 2))
-                    if test_data_start_from + test_idx + hold_stock_days >= prices_and_indexes[stock_index].shape[0]:
-                        print("| 股票: ", stock_index, 
-                                "\t 持股天数: ", hold_stock_days, 
+                    hold_stock_days = int(np.floor((stocks_dataset_test.time_slices_label[adv_i + 1] + stocks_dataset_test.time_slices_label[adv_i + 2]) / 2)) - 1
+                    if test_data_start_from + test_idx + hold_stock_days + 1 >= prices_and_indexes[stock_index].shape[0]:
+                        print("| code: ", stock_index, 
+                                "\t 持有天数: ", hold_stock_days, 
                                 )
                         continue
                     current_price = prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx + 1].open
                     
 
-                    if test_data_start_from + test_idx + hold_stock_days < test_data_end_at:
-                        future_price = prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx + hold_stock_days].close
-                        sell_stock_date = prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx + hold_stock_days].name
+                    if test_data_start_from + test_idx + hold_stock_days + 1 < min(test_data_end_at, len(prices_and_indexes[stock_index])):
+                        future_price = prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx + hold_stock_days + 1].open
+                        sell_stock_date = prices_and_indexes[stock_index].iloc[test_data_start_from + test_idx + hold_stock_days + 1].name
                         
                     if current_price > 0 and future_price > 0:
                         ratio_tmp = future_price / current_price
                         # 不计算复利，每一时刻拿出本金的 1 / args.test_stock_num / hold_stock_days 购买新股票
                         # 到期卖出后，如果股票价值低于本金的 1 / args.test_stock_num / hold_stock_days 则将本金补至初始本金并在利润中减去亏损值
                         # 到期卖出后，如果股票价值高于本金的 1 / args.test_stock_num / hold_stock_days 则在总利润中加上当前利润
-                        ratios[adv_i] = ratios[adv_i] + (ratio_tmp - 1) / args.test_stock_num / hold_stock_days
-                        print("| 股票: ", stock_index, 
-                            "\t 持股天数: ", hold_stock_days, 
-                            "\t 策略净值:", str(ratios[adv_i])[: 5], 
-                            "\t 股票售价/现价:", str(ratio_tmp)[: 5], 
-                            "\t 现价:", str(current_price)[: 5], 
-                            "\t 售价:", str(future_price)[: 5] , 
-                            "\t 出售日期:", sell_stock_date , 
-                            "\t 优势度:", str(current_adv)[: 5] , 
-                            "\t|",
-                            )
+                        ratios[adv_i] = ratios[adv_i] + (ratio_tmp - 1) / test_stock_num / hold_stock_days
+                        if stock_num_idx < args.test_stock_num:
+                            print("| code: ", stock_index, 
+                                "\t 持有天数: ", hold_stock_days, 
+                                "\t 净值:", str(ratios[adv_i])[: 5], 
+                                "\t 售价/现价:", str(ratio_tmp)[: 5], 
+                                "\t 现价:", str(current_price)[: 5], 
+                                "\t 售价:", str(future_price)[: 5] , 
+                                "\t 出售日期:", sell_stock_date , 
+                                "\t 优势度:", str(current_adv)[: 5] , 
+                                "\t|",
+                                )
                 daily_ratios[adv_i].append(ratios[adv_i])
                     
                 # # 获取股票的index和持有期限
@@ -240,7 +247,11 @@ def train(args):
                 # hold_stock_index = large_mean_indexes2[adv_i][0]
                 # # current_adv = label_npy[0, hold_stock_index, hold_stock_days_index]
                 # advs[adv_i].append(sum(current_advs) / len(current_advs))
-                advs[adv_i].append(current_adv)
+                if len(current_advs) > 0:
+                    current_adv_avg = sum(current_advs) / len(current_advs)
+                else:
+                    current_adv_avg = 1
+                advs[adv_i].append(current_adv_avg)
             aaa = 1
         # print(advs)
         print("ratios: ", ratios)
@@ -254,7 +265,8 @@ def train(args):
         
         for i in range(len(daily_ratios)):
             plt.plot(dates, daily_ratios[i])
-            hold_stock_days = int(np.ceil((stocks_dataset_test.time_slices_label[i + 1] + stocks_dataset_test.time_slices_label[i + 2]) / 2))
+            hold_stock_days = int(np.floor((stocks_dataset_test.time_slices_label[i + 1] + stocks_dataset_test.time_slices_label[i + 2]) / 2)) - 1
+            plt.xticks(rotation=30)
             plt.savefig("持有天数" + str(hold_stock_days) + ".png")
             plt.close()
             max_pullback = 1
@@ -287,7 +299,7 @@ def train(args):
             break
         
         model.train()
-        for _ in range(2):
+        for _ in range(80):
             for item in dataloader:
                 # print(item)
                 step += 1
@@ -321,7 +333,7 @@ def train(args):
                     mean_var = 0.999 * mean_var + 0.001 * torch.mean(var).item()
                 
                 if step % 500 == 0:
-                    torch.save(model.state_dict(), "model.pt")
+                    torch.save(model.state_dict(), args.save_model)
                 
                 opt.zero_grad()
                 loss.backward()
@@ -374,13 +386,13 @@ def parse_args():
         default="datas_clean/indexes",
     )
     parser.add_argument(
-        "--data_start_from",
+        "--train_data_start_from",
         type=int,
         help="训练数据开始index",
         default=1200,
     )
     parser.add_argument(
-        "--data_end_at",
+        "--train_data_end_at",
         type=int,
         help="训练数据结束index",
         default=3000,
@@ -416,6 +428,12 @@ def parse_args():
         default="",
     )
     parser.add_argument(
+        "--save_model",
+        type=str,
+        help="",
+        default="model.pt",
+    )
+    parser.add_argument(
         "--train_stock_num",
         type=int,
         help="",
@@ -439,12 +457,7 @@ def parse_args():
         help="",
         default=0,
     )
-    parser.add_argument(
-        "--stat_dirpath",
-        type=str,
-        help="",
-        default=36000,
-    )
+
     
     args = parser.parse_args()
     return args

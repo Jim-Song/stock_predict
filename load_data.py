@@ -27,10 +27,10 @@ class StocksDataset(Dataset):
                  only_test=False,
                  only_need_result=False,
                  ):
-        time_slices = [0, -1,  -2,  -3,  -4,  -5,  -7,  -9,  -11, -13, -15, 
-                       -18, -21, -24, -27, -30, -34, -38, -42, -46, -50, 
-                       -55, -60, -65, -70, -75, -81, -87, -93, -99, -105, -112, -119, -126, -133, -143, -155]
-        time_slices_label = [0, 1, 2, 4, 8, 16, 28, 44, 64]
+        time_slices = [0, -1,  -2,  -3,  -4,  -6,  -8,  -10, -12, -14, 
+                       -17, -20, -23, -26, -29, -33, -37, -41, -45, -49, 
+                       -54, -59, -64, -69, -74, -80, -86, -92, -98, -104, -111, -118, -125, -132, -142, -154]
+        time_slices_label = [1, 2, 3, 5, 8, 16, 28, 44, 64]
         self.history_len = len(time_slices)
         self.predict_len = len(time_slices_label)
         self.data_start_from = data_start_from
@@ -146,6 +146,8 @@ class StocksDataset(Dataset):
         # tmp = data_block[:, self.time_slices + idx, :]
         # 将 time_slices 每两个相邻的日期的数据取出，取平均值
         slice_all = []
+        slice_tmp = np.expand_dims(data_block[:, idx, :], axis=1)
+        slice_all.append(slice_tmp)
         for i in range(self.history_len - 1):
             # start = self.time_slices[i]
             # end = self.time_slices[i + 1]
@@ -157,7 +159,7 @@ class StocksDataset(Dataset):
         
         # 将数据做随机化扰动，避免过拟合
         if self.use_rand:
-            rand_vars = np.linspace(0.01, 0.08, self.history_len - 1)
+            rand_vars = np.linspace(0.01, 0.08, self.history_len)
             stocks_num, time_range, feature_size = tmp.shape
             rands = []
             for var in rand_vars:
@@ -172,6 +174,7 @@ class StocksDataset(Dataset):
         jizhun[:, :, -1] = 1
         tmp = (tmp / jizhun) - 1
         tmp = tmp[:, 1:, :]
+        # print("tmp1: ", tmp)
         # money 数据取对数，反应市值情况
         tmp[:, :, -1] = np.log10(tmp[:, :, -1])
         # tmp.size = [stock, time, price], 对特征做归一化
@@ -180,6 +183,7 @@ class StocksDataset(Dataset):
         tmp_std = np.std(tmp, axis=0)
         tmp_std = np.expand_dims(tmp_std, axis=0)
         tmp = (tmp - tmp_mean) / tmp_std
+        # print("tmp2: ", tmp)
 
 # # tmp = raw_prices[0].numpy()
 #         jizhun = tmp[:, 0, :].copy()
@@ -195,8 +199,10 @@ class StocksDataset(Dataset):
         # 取出不包含nan数据的股票
         stocks_indexes = np.array(list(range(stocks_num)))
         stock_not_nan_indexes = ~np.isnan(tmp).any(axis=2).any(axis=1)
+        # np.save("tmp.npy", tmp)
+        # print("tmp: ", tmp)
         stock_not_nan_indexes = stocks_indexes[stock_not_nan_indexes]
-        print(stock_not_nan_indexes)
+        # print(stock_not_nan_indexes)
         # print(idx)
         # print(num)
         if num > 0:
@@ -209,6 +215,8 @@ class StocksDataset(Dataset):
         # print(stock_final_indexes)
         stock_final_indexes.sort()
         stocks_final = tmp[stock_final_indexes, :, :]
+        # print("stock_not_nan_indexes: ", stock_not_nan_indexes)
+        # print("tmp3: ", stocks_final)
         # stocks_final = torch.tensor(stocks_final, dtype=torch.float32).cuda()
         # stock_final_indexes += bias
         embedding_bianhao = self.position_to_embedding_num[stock_final_indexes]
@@ -217,34 +225,48 @@ class StocksDataset(Dataset):
 
 
     def get_label(self, data_block, idx, must_have_indexes=[0]):
-        if self.only_need_result:
-            stocks_final = np.zeros([len(must_have_indexes), 7])
-            return stocks_final
-            
+        # if self.only_need_result:
+        #     stocks_final = np.zeros([len(must_have_indexes), 7])
+        #     return stocks_final
         idx = idx - self.time_slices[-1]
         slice_all = []
         for i in range(self.predict_len - 1):
             # start = self.time_slices_label[i]
             # end = self.time_slices_label[i + 1]
             slice_tmp = np.mean(data_block[:, self.time_slices_label[i] + idx: self.time_slices_label[i + 1] + idx, :], axis=1)
+            if self.only_need_result:
+                # print("111", slice_tmp.shape)
+                # print(slice_tmp)
+                if np.isnan(slice_tmp).sum() > 0:
+                    # print(222)
+                    slice_tmp = data_block[:, -1]
+                    # print(slice_tmp)
+                # print(333)
+                # print(slice_tmp)
             slice_tmp = np.expand_dims(slice_tmp, axis=1)
             slice_all.append(slice_tmp)
             
         tmp = np.concatenate(slice_all, axis=1)
+        # print("tmp ", tmp)
         tmp = tmp[must_have_indexes]
+        label_raw = copy.copy(tmp)
         jizhun = tmp[:, 0, :].copy()
         jizhun = np.expand_dims(jizhun, axis=1)
         tmp = (tmp / jizhun) - 1
         tmp = tmp[:, 1:, :]
+        # print("tmp2 ", tmp)
         # stock, time, price
         tmp_mean = np.mean(tmp, axis=0)
+        # print("tmp_mean ", tmp_mean)
         tmp_mean = np.expand_dims(tmp_mean, axis=0)
         tmp_std = np.std(tmp, axis=0)
+        tmp_std[tmp_std == 0] = 1
         tmp_std = np.expand_dims(tmp_std, axis=0)
         tmp = (tmp - tmp_mean) / tmp_std
+        # print("tmp3 ", tmp)
 
         stocks_final = tmp[:, :, 0]
-        return stocks_final
+        return stocks_final, label_raw
 
 
 
@@ -256,7 +278,7 @@ class StocksDataset(Dataset):
         stock_prices, stock_indexes, embedding_bianhao, stock_prices_raw = self.get_non_nan_data_row(self.prices_and_indexes_data_block, idx, bias=0, num=self.num1)
         # index_prices, index_indexes = self.get_non_nan_data_row(self.indexes_data_block, idx, bias=10000, num=self.num2, must_have_indexes=[])
         
-        label_prices = self.get_label(self.prices_and_indexes_data_block, idx, must_have_indexes=stock_indexes)
+        label_prices, label_raw = self.get_label(self.prices_and_indexes_data_block, idx, must_have_indexes=stock_indexes)
         
         # normal
         sample1 = stock_prices
@@ -279,7 +301,7 @@ class StocksDataset(Dataset):
         # label = index_prices[0, self.history_len:, 0] / index_prices[0, 0, 0]
         sample1 = torch.tensor(sample1, dtype=torch.float32)
         sample1 = sample1[:, :, :6]
-        return sample1, sample2, label_prices, idx, stock_prices_raw, stock_indexes
+        return sample1, sample2, label_prices, idx, stock_prices_raw, stock_indexes, label_raw
 
 
 
